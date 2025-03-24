@@ -1,0 +1,13 @@
+TRANS       c       8       in      1
+M           i       32      in      1
+N           i       32      in      1
+KL          i       32      in      1
+KU          i       32      in      1
+ALPHA       r       32      in      1
+A           r       32      in      ${LDA} * ${N}
+LDA         i       32      in      1
+X           r       32      in      if [ ${TRANS} == N ]; then 1 + ( ${N} - 1 ) * abs(${INCX}); else 1 + ( ${M} - 1 ) * abs(${INCX}); fi
+INCX        i       32      in      1
+BETA        r       32      in      1
+Y           r       32      inout   if [ ${TRANS} == N ]; then 1 + ( ${M} - 1 ) * abs(${INCY}); else 1 + ( ${N} - 1 ) * abs(${INCY}); fi
+INCY        i       32      in      1

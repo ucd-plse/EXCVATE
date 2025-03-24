@@ -1,0 +1,43 @@
+#! /bin/bash
+
+usage() { echo "Usage: $0 -f <path_to_prototype_files> -- <command_to_execute_regression_tests>"; exit 1; }
+
+while getopts ":f:" opt; do
+    case ${opt} in
+        f)
+            PROTOTYPE_DIR_PATH=$(realpath ${OPTARG})
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+if [[ -z ${PROTOTYPE_DIR_PATH} ]]
+then
+    usage
+fi
+
+shift $((OPTIND - 1))
+
+OUTPUT_DIR=__EXCVATE
+REPO_ROOT=$(git rev-parse --show-toplevel)
+PIN_DIR=$(find ${REPO_ROOT}/submodules/ -maxdepth 1 -type d -name "pin-*")
+
+mkdir -p ${OUTPUT_DIR}
+
+echo
+echo "** selecting function executions for replay"
+for x in $(find ${PROTOTYPE_DIR_PATH} -maxdepth 1 -type f -name "*.prototype")
+do
+    FUNCTION_NAME=$(basename ${x%.*})
+    if nm $@ | grep -q -e "T ${FUNCTION_NAME}" -e "t ${FUNCTION_NAME}"
+    then
+        mkdir -p ${OUTPUT_DIR}/${FUNCTION_NAME}
+        echo ${x} >> ${OUTPUT_DIR}/__input_file_list
+    fi
+done
+
+${PIN_DIR}/pin -t ${PIN_DIR}/source/tools/EXCVATE/obj-intel64/execution_selector.so -- $@
+
+rm -f ${OUTPUT_DIR}/__input_file_list

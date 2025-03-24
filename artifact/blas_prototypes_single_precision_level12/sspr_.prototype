@@ -1,0 +1,6 @@
+UPLO        c       8       in      1
+N           i       32      in      1
+ALPHA       r       32      in      1
+X           r       32      in      1 + ( ${N} - 1 ) * abs(${INCX})
+INCX        i       32      in      1
+AP          r       32      inout   ( ${N} * ( ${N} + 1 ) ) / 2

@@ -1,0 +1,134 @@
+#! /bin/bash
+
+usage() { echo "Usage: $0 -f <path_to_prototype_files> -- <command_to_execute_regression_tests>"; exit 1; }
+
+while getopts ":f:" opt; do
+    case ${opt} in
+        f)
+            PROTOTYPE_DIR_PATH=$(realpath ${OPTARG})
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+if [[ -z ${PROTOTYPE_DIR_PATH} ]]
+then
+    usage
+fi
+
+shift $((OPTIND - 1))
+
+OUTPUT_DIR=__EXCVATE
+REPO_ROOT=$(git rev-parse --show-toplevel)
+PIN_DIR=$(find ${REPO_ROOT}/submodules/ -maxdepth 1 -type d -name "pin-*")
+
+echo
+echo "** attempting to generate inputs that reify exception-handling failures"
+ERROR_HANDLER_NAMES="$(for x in $(find ${PROTOTYPE_DIR_PATH} -maxdepth 1 -type f -name "*.error_handler"); do echo -n "$(basename ${x%.*}) "; done)"
+for x in $(find ${PROTOTYPE_DIR_PATH} -maxdepth 1 -type f -name "*.prototype")
+do
+    FUNCTION_NAME=$(basename ${x%.*})
+    if [ ! -f ${OUTPUT_DIR}/${FUNCTION_NAME}/.done2 ] && nm $@ | grep -q -e "T ${FUNCTION_NAME}" -e "t ${FUNCTION_NAME}"
+    then
+
+        rm -f ${OUTPUT_DIR}/${FUNCTION_NAME}/__input_file_list
+        for y in $(find ${OUTPUT_DIR}/${FUNCTION_NAME} -maxdepth 1 -type f -name "${FUNCTION_NAME}.*.*.out")
+        do
+            echo ${y} >> ${OUTPUT_DIR}/${FUNCTION_NAME}/__input_file_list
+        done
+
+        if [ -f ${OUTPUT_DIR}/${FUNCTION_NAME}/__input_file_list ]
+        then
+            echo "    "${FUNCTION_NAME}
+            ${PIN_DIR}/pin -t ${PIN_DIR}/source/tools/EXCVATE/obj-intel64/constraint_gatherer.so -f ${x} -- "$@"
+            touch ${OUTPUT_DIR}/${FUNCTION_NAME}/.done2 
+
+            error_string="ERROR: (UNSUPPORTED INSTRUCTION) "
+            queries_with_unsupported_instructions=$(find ${OUTPUT_DIR}/${FUNCTION_NAME} -name "*.smt2.in*" | xargs grep -l -e "${error_string}")
+            if [[ -n "${queries_with_unsupported_instructions}" ]]; then
+                echo "        "$(echo "${queries_with_unsupported_instructions}" | wc -l)/$(find ${OUTPUT_DIR}/${FUNCTION_NAME} -name "*.smt2.in*" | wc -l) SMT queries contain the following unsupported instructions:
+                grep -h -e "${error_string}" ${queries_with_unsupported_instructions} | sort | uniq | sed "s/${error_string}/            /"
+                rm ${queries_with_unsupported_instructions}
+            fi
+            
+            for y in $(cat ${OUTPUT_DIR}/${FUNCTION_NAME}/__input_file_list)
+            do
+                if [ -f ${y%.*}.smt2.in1 ]
+                then
+                    ${REPO_ROOT}/submodules/cvc5-cvc5-1.2.0/install/bin/cvc5 ${y%.*}.smt2.in1 > ${y%.*}.smt2.out1
+                    if grep -qe "unsat" ${y%.*}.smt2.out1
+                    then
+                        rm ${y%.*}*
+                    else
+                        echo ${y%.*}.smt2.out1 >> ${OUTPUT_DIR}/${FUNCTION_NAME}/__new_input_file_list
+                    fi
+                else
+                    rm ${y} # for instances in which no smt queries were generated because the constraint_gatherer plugin could tell statically that no exception was possible at the spoofed site
+                fi
+
+                if [ -f ${y%.*}.smt2.in2 ]
+                then
+                    ${REPO_ROOT}/submodules/cvc5-cvc5-1.2.0/install/bin/cvc5 ${y%.*}.smt2.in2 > ${y%.*}.smt2.out2
+                    if grep -qe "unsat" ${y%.*}.smt2.out2
+                    then
+                        rm -f ${y%.*}.smt2.in2 ${y%.*}.smt2.out2 ${y%.*}.smt2.in4
+                    else
+                        echo ${y%.*}.smt2.out2 >> ${OUTPUT_DIR}/${FUNCTION_NAME}/__new_input_file_list
+                    fi
+                fi
+
+                if [ -f ${y%.*}.smt2.in3 ]
+                then
+                    ${REPO_ROOT}/submodules/cvc5-cvc5-1.2.0/install/bin/cvc5 ${y%.*}.smt2.in3 > ${y%.*}.smt2.out3
+                    if grep -qe "unsat" ${y%.*}.smt2.out3
+                    then
+                        rm -f ${y%.*}.smt2.in3 ${y%.*}.smt2.out3 ${y%.*}.smt2.in4
+                    else
+                        echo ${y%.*}.smt2.out3 >> ${OUTPUT_DIR}/${FUNCTION_NAME}/__new_input_file_list
+                    fi
+                fi
+
+                if [ -f ${y%.*}.smt2.in4 ]
+                then
+                    ${REPO_ROOT}/submodules/cvc5-cvc5-1.2.0/install/bin/cvc5 ${y%.*}.smt2.in4 > ${y%.*}.smt2.out4
+                    if grep -qe "unsat" ${y%.*}.smt2.out4
+                    then
+                        rm -f ${y%.*}.smt2.in4 ${y%.*}.smt2.out4
+                    else
+                        echo ${y%.*}.smt2.out4 >> ${OUTPUT_DIR}/${FUNCTION_NAME}/__new_input_file_list
+                    fi
+                fi
+            done
+
+            if [[ -f ${OUTPUT_DIR}/${FUNCTION_NAME}/__new_input_file_list ]]
+            then
+                echo "        "$(cat ${OUTPUT_DIR}/${FUNCTION_NAME}/__new_input_file_list | wc -l)" SAT instances"
+                mv ${OUTPUT_DIR}/${FUNCTION_NAME}/__new_input_file_list ${OUTPUT_DIR}/${FUNCTION_NAME}/__input_file_list
+
+                ${PIN_DIR}/pin -t ${PIN_DIR}/source/tools/EXCVATE/obj-intel64/taint_tracker.so -f ${x} -e "${ERROR_HANDLER_NAMES}" -- "$@"
+
+                echo "        "$(find ${OUTPUT_DIR}/${FUNCTION_NAME} -name "*.event_trace" | wc -l)" event traces generated"
+                for y in $(cat ${OUTPUT_DIR}/${FUNCTION_NAME}/__input_file_list)
+                do
+                    if [ ! -f ${y}.event_trace ]
+                    then
+                        rm ${y%.*}.out${y:0-1} ${y%.*}.in${y:0-1}
+                    fi
+                done
+                for y in $(find ${OUTPUT_DIR}/${FUNCTION_NAME} -maxdepth 1 -type f -name "${FUNCTION_NAME}.*.*.out")
+                do
+                    if ! ls ${y%.*}.smt2* > /dev/null 2>&1
+                    then
+                        rm ${y}
+                    fi
+                done
+            else
+                echo "        0 SAT instances"
+            fi
+            
+            rm ${OUTPUT_DIR}/${FUNCTION_NAME}/__input_file_list
+        fi
+    fi
+done

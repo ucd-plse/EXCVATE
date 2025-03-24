@@ -1,0 +1,12 @@
+UPLO    c   8   -       1 
+TRANS   c   8   -       1 
+N       i   32  -       1 
+K       i   32  -       1 
+ALPHA   r   32  in      1 
+A       r   32  in      if [ ${TRANS} == N ]; then ${LDA} * ${K}; else ${LDA} * ${N}; fi 
+LDA     i   32  -       1 
+B       r   32  in      if [ ${TRANS} == N ]; then ${LDB} * ${K}; else ${LDA} * ${N}; fi 
+LDB     i   32  -       1 
+BETA    r   32  in      1 
+C       r   32  inout   ${LDC} * ${N} 
+LDC     i   32  -       1 

@@ -1,0 +1,5 @@
+SD1       r       32      inout   1
+SD2       r       32      inout   1
+SX1       r       32      inout   1
+SY1       r       32      in      1
+SPARAM    r       32      out     5

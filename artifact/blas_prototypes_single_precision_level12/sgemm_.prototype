@@ -1,0 +1,13 @@
+TRANSA  c   8   -       1 
+TRANSB  c   8   -       1 
+M       i   32  -       1 
+N       i   32  -       1 
+K       i   32  -       1 
+ALPHA   r   32  in      1 
+A       r   32  in      if [ ${TRANSA} == N ]; then ${LDA} * ${K}; else ${LDA} * ${M}; fi 
+LDA     i   32  -       1 
+B       r   32  in      if [ ${TRANSB} == N ]; then ${LDB} * ${N}; else ${LDB} * ${K}; fi 
+LDB     i   32  -       1 
+BETA    r   32  in      1 
+C       r   32  inout   ${LDC} * ${N} 
+LDC     i   32  -       1 

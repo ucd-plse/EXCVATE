@@ -1,0 +1,4 @@
+N       i   32      in      1
+SX      r   32      in      1 + ( ${N} - 1 ) * abs(${INCX})
+INCX    i   32      in      1
+SASUM   r   32      return  1

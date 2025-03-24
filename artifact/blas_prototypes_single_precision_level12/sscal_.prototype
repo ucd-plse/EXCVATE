@@ -1,0 +1,4 @@
+N       i   32      in      1
+A       r   32      in      1
+SX      r   32      inout   1 + ( ${N} - 1 ) * abs(${INCX})
+INCX    i   32      in      1

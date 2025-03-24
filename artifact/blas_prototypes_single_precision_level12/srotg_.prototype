@@ -1,0 +1,4 @@
+A       r       32      inout   1
+B       r       32      inout   1
+C       r       32      out     1
+S       r       32      out     1

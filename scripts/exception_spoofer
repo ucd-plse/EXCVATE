@@ -1,0 +1,40 @@
+#! /bin/bash
+
+usage() { echo "Usage: $0 -f <path_to_prototype_files> -- <command_to_execute_regression_tests>"; exit 1; }
+
+while getopts ":f:" opt; do
+    case ${opt} in
+        f)
+            PROTOTYPE_DIR_PATH=$(realpath ${OPTARG})
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+if [[ -z ${PROTOTYPE_DIR_PATH} ]]
+then
+    usage
+fi
+
+shift $((OPTIND - 1))
+
+OUTPUT_DIR=__EXCVATE
+REPO_ROOT=$(git rev-parse --show-toplevel)
+PIN_DIR=$(find ${REPO_ROOT}/submodules/ -maxdepth 1 -type d -name "pin-*")
+
+echo
+echo "** replaying function executions with nan overwrites"
+
+ERROR_HANDLER_NAMES="$(for x in $(find ${PROTOTYPE_DIR_PATH} -maxdepth 1 -type f -name "*.error_handler"); do echo -n "$(basename ${x%.*}) "; done)"
+for x in $(find ${PROTOTYPE_DIR_PATH} -maxdepth 1 -type f -name "*.prototype")
+do
+    FUNCTION_NAME=$(basename ${x%.*})
+    if [ ! -f ${OUTPUT_DIR}/${FUNCTION_NAME}/.done1 ] && [ -f ${OUTPUT_DIR}/${FUNCTION_NAME}/${FUNCTION_NAME}.io_vars ] && nm $@ | grep -q -e "T ${FUNCTION_NAME}" -e "t ${FUNCTION_NAME}"
+    then
+        echo "    "${FUNCTION_NAME}
+        ${PIN_DIR}/pin -t ${PIN_DIR}/source/tools/EXCVATE/obj-intel64/nan_spoofer.so -f ${x} -m 1 -e "${ERROR_HANDLER_NAMES}" -- "$@"
+        touch ${OUTPUT_DIR}/${FUNCTION_NAME}/.done1
+    fi
+done

@@ -1,0 +1,11 @@
+UPLO        c       8       in      1
+N           i       32      in      1
+K           i       32      in      1
+ALPHA       r       32      in      1
+A           r       32      in      ${LDA} * ${N}
+LDA         i       32      in      1
+X           r       32      in      1 + ( ${N} - 1 ) * abs(${INCX})
+INCX        i       32      in      1
+BETA        r       32      in      1
+Y           r       32      inout   1 + ( ${N} - 1 ) * abs(${INCY})
+INCY        i       32      in      1

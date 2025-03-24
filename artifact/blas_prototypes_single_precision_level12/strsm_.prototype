@@ -1,0 +1,11 @@
+SIDE    c   8   -       1 
+UPLO    c   8   -       1 
+TRANSA  c   8   -       1 
+DIAG    c   8   -       1 
+M       i   32  -       1 
+N       i   32  -       1 
+ALPHA   r   32  in      1 
+A       r   32  in      if [ ${SIDE} == L ]; then ${LDA} * ${M}; else ${LDA} * ${N}; fi 
+LDA     i   32  -       1 
+B       r   32  inout   ${LDB} * ${N} 
+LDB     i   32  -       1 
