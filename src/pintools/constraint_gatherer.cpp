@@ -502,7 +502,7 @@ void process_EV_generator_reg( ADDRINT rtn_id, ADDRINT ins_offset, ADDRINT n_val
         EV_generator_id.back() = to_string(i);
 
         if ( EV_GENERATOR_HASH_FUNCTION(EV_generator_id) == THIS_EV_GENERATOR_HASH ){
-            string sym_var_name = "reg_" + REG_StringShort(INSTRUCTION_OBJ_MAP[rtn_id][ins_offset]->write_vec_registers.back()->reg);
+            string sym_var_name = "reg_" + REG_StringShort(REG_FullRegName(INSTRUCTION_OBJ_MAP[rtn_id][ins_offset]->write_vec_registers.back()->reg));
             sym_var_name = sym_var_name + "_" + to_string(SYM_VAR_COUNTERS[sym_var_name]) + "_b" + to_string(INSTRUCTION_OBJ_MAP[rtn_id][ins_offset]->write_vec_registers.back()->n_bytes * 8) + "_" + to_string(i);
             if ( ACTIVE_SYM_VAR_NAMES.find(sym_var_name) == ACTIVE_SYM_VAR_NAMES.end() ){
                 log2("Operands are not symbolic at the target for the spoofed exception! No exception possible.");
@@ -787,7 +787,7 @@ void cmp_readVM( ADDRINT rtn_id, ADDRINT ins_offset, PINTOOL_REGISTER* r_reg_val
 }
 
 string reg_to_sym_var_base_name( Operand* reg_obj, bool create_fresh ){
-    string sym_var_base_name = "reg_" + REG_StringShort(reg_obj->reg);
+    string sym_var_base_name = "reg_" + REG_StringShort(REG_FullRegName(reg_obj->reg));
     if ( create_fresh ){
         if ( SYM_VAR_COUNTERS.find(sym_var_base_name) == SYM_VAR_COUNTERS.end() ){
             SYM_VAR_COUNTERS[sym_var_base_name] = 0;
