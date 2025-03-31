@@ -1909,6 +1909,8 @@ std::string opcode_to_smtlib2( OPCODE iclass ){
             return "$insert";
         case XED_ICLASS_VINSERTF128:
             return "$vinsertf128";
+        case XED_ICLASS_VEXTRACTF128:
+            return "$vextractf128";
 
         // conversions involving integer types
         case XED_ICLASS_CVTDQ2PD:

@@ -1181,6 +1181,24 @@ void add_smt_text( Instruction* ins_obj_ptr, const vector<string>& w_operands, c
             assert(false);
         }
     }
+    else if ( smtlib2_op == "$vextractf128" ){
+        bitset<64> control(ins_obj_ptr->immediates.back()->imm_value);
+        if ( control.test(0) ){
+            for ( uint32_t i = 0; i < w_operands.size(); ++i ){
+                assertion_text = "( assert ( = " + w_operands[i] + " " + r_operands1[r_operands1.size()/2 + i] + " ) )";
+                add_smt_text_helper(assertion_text, ins_obj_ptr, w_operands[i], r_operands1[r_operands1.size()/2 + i], null_arg);
+            }
+        }   
+        else if ( !control.test(0) ){
+            for ( uint32_t i = 0; i < w_operands.size(); ++i ){
+                assertion_text = "( assert ( = " + w_operands[i] + " " + r_operands1[i] + " ) )";
+                add_smt_text_helper(assertion_text, ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+        }
+        else{
+            assert(false);
+        }
+    }
     else if ( smtlib2_op == "$unpckhp" ){
         n_written_values = r_operands2.size();
         string selected_arg = "";
