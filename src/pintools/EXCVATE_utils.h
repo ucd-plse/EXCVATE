@@ -1912,6 +1912,37 @@ std::string opcode_to_smtlib2( OPCODE iclass ){
         case XED_ICLASS_VEXTRACTF128:
             return "$vextractf128";
 
+        case XED_ICLASS_VPSLLQ:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_VPSLLD:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_VPSLLW:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_PSLLQ:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_PSLLD:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_PSLLW:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_VPSRLW:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_VPSRLD:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_VPSRLQ:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_PSRLW:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_PSRLD:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_PSRLQ:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_VPSRAW:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_VPSRAD:
+            return "ERROR: shift not yet supported";
+        case XED_ICLASS_VPSRAQ:
+            return "ERROR: shift not yet supported";
+
         // conversions involving integer types
         case XED_ICLASS_CVTDQ2PD:
             return "ERROR: conversion to and from integer types not yet supported";
