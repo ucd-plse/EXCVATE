@@ -142,10 +142,26 @@ void pre_call( ADDRINT rtn_id ){
 
 void log_unsupported_instruction( ADDRINT rtn_id, ADDRINT ins_offset, ADDRINT opcode ){
     if ( GO ){
-        string containing_rtn_name = ROUTINE_NAME_MAP[rtn_id];
-        ostringstream oss;
-        oss << left << setw(6) << opcode << setw(50) << INSTRUCTION_OBJ_MAP[rtn_id][ins_offset]->disassembly << setw(100) << INSTRUCTION_OBJ_MAP[rtn_id][ins_offset]->src_location;
-        SMT_INPUT.add_assertion_text("ERROR: (UNSUPPORTED INSTRUCTION) " + oss.str());
+
+        bool read_symbolic = false;
+        for ( const auto &reg_obj : INSTRUCTION_OBJ_MAP[rtn_id][ins_offset]->read_vec_registers ){
+            string sym_var_uniq_name = "";
+            string sym_var_base_name = reg_to_sym_var_base_name(reg_obj, false);
+            for ( uint32_t i = 0; i < REG_Size(reg_obj->reg)/reg_obj->n_bytes; ++i ){
+                sym_var_uniq_name = sym_var_base_name + "_" + to_string(i);
+                auto it = ACTIVE_SYM_VAR_NAMES.find(sym_var_uniq_name);
+                if ( it != ACTIVE_SYM_VAR_NAMES.end() ){
+                    read_symbolic = true;
+                }
+            }
+        }
+
+        if ( read_symbolic == true ){
+            string containing_rtn_name = ROUTINE_NAME_MAP[rtn_id];
+            ostringstream oss;
+            oss << left << setw(6) << opcode << setw(50) << INSTRUCTION_OBJ_MAP[rtn_id][ins_offset]->disassembly << setw(100) << INSTRUCTION_OBJ_MAP[rtn_id][ins_offset]->src_location;
+            SMT_INPUT.add_assertion_text("ERROR: (UNSUPPORTED INSTRUCTION) " + oss.str());
+        }
     }
 }
 
