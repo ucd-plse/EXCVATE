@@ -1158,21 +1158,21 @@ void add_smt_text( Instruction* ins_obj_ptr, const vector<string>& w_operands, c
     else if ( smtlib2_op == "$vinsertf128" ){
         bitset<64> control(ins_obj_ptr->immediates.back()->imm_value);
         if ( control.test(0) ){
-            for ( uint32_t i = 0; i < r_operands1.size()/2; ++i ){
+            for ( uint32_t i = 0; i < w_operands.size()/2; ++i ){
                 assertion_text = "( assert ( = " + w_operands[i] + " " + r_operands1[i] + " ) )";
                 add_smt_text_helper(assertion_text, ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
             }
-            for ( uint32_t i = r_operands2.size()/2; i < r_operands2.size(); ++i ){
-                assertion_text = "( assert ( = " + w_operands[i] + " " + r_operands2[i] + " ) )";
-                add_smt_text_helper(assertion_text, ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+            for ( uint32_t i = 0; i < w_operands.size()/2; ++i ){
+                assertion_text = "( assert ( = " + w_operands[w_operands.size()/2 + i] + " " + r_operands2[i] + " ) )";
+                add_smt_text_helper(assertion_text, ins_obj_ptr, w_operands[w_operands.size()/2 + i], null_arg, r_operands2[i]);
             }
         }   
         else if ( !control.test(0) ){
-            for ( uint32_t i = 0; i < r_operands2.size()/2; ++i ){
+            for ( uint32_t i = 0; i < w_operands.size()/2; ++i ){
                 assertion_text = "( assert ( = " + w_operands[i] + " " + r_operands2[i] + " ) )";
                 add_smt_text_helper(assertion_text, ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
             }
-            for ( uint32_t i = r_operands1.size()/2; i < r_operands1.size(); ++i ){
+            for ( uint32_t i = w_operands.size()/2; i < w_operands.size(); ++i ){
                 assertion_text = "( assert ( = " + w_operands[i] + " " + r_operands1[i] + " ) )";
                 add_smt_text_helper(assertion_text, ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
             }
