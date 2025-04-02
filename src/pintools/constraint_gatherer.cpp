@@ -911,7 +911,7 @@ string select( vector<string> src, uint32_t src_start_idx, bitset<64> ctrl, uint
 void add_smt_text_helper( string assertion_text, Instruction* ins_obj_ptr, string w_operand, string r_operand1, string r_operand2 ){
 
     // note that symbolic write memory operands will always be relevant, regardless of whether the read operands are symbolic
-    bool symbolic;
+    bool symbolic = false;
 
     if ( w_operand[0] == 'm' ){
         symbolic = true;
@@ -1673,17 +1673,6 @@ void instrument_instruction( INS ins ){
             assert(false && "unexpected read operators for compare op");
         }
     }
-    else if ( opcode_to_smtlib2(INS_Opcode(ins)).find("ERROR:") != string::npos ){
-        INS_InsertCall(
-            ins,
-            IPOINT_BEFORE,
-            (AFUNPTR) log_unsupported_instruction,
-            IARG_ADDRINT, rtn_id,
-            IARG_ADDRINT, ins_offset,
-            IARG_ADDRINT, INS_Opcode(ins),
-            IARG_END
-        );
-    }
     else{
         if ( (ins_obj_ptr->write_memory.size() == 1) && (ins_obj_ptr->write_vec_registers.size() == 0) && (ins_obj_ptr->read_vec_registers.size() == 1) && (ins_obj_ptr->read_memory.size() == 0) ){
             INS_InsertCall(
@@ -1764,6 +1753,18 @@ void instrument_instruction( INS ins ){
                 IARG_END
             );
         }
+    }
+
+    if ( opcode_to_smtlib2(INS_Opcode(ins)).find("ERROR:") != string::npos ){
+        INS_InsertCall(
+            ins,
+            IPOINT_BEFORE,
+            (AFUNPTR) log_unsupported_instruction,
+            IARG_ADDRINT, rtn_id,
+            IARG_ADDRINT, ins_offset,
+            IARG_ADDRINT, INS_Opcode(ins),
+            IARG_END
+        );
     }
 
     if ( is_EV_generator_reg(INS_Opcode(ins)) > NOT_INJECTABLE && is_EV_generator_reg(INS_Opcode(ins)) < ADDSUB ){        
