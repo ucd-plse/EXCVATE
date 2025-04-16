@@ -87,10 +87,10 @@ void pre_call( ADDRINT rtn_id );
 void check_write_operand( ADDRINT rtn_id, ADDRINT ins_offset, PINTOOL_REGISTER* reg, ADDRINT w_base_address );
 void mark_nonEVable_write_operand( ADDRINT rtn_id, ADDRINT ins_offset, PINTOOL_REGISTER* reg, ADDRINT w_base_address );
 void check_read_operands( ADDRINT rtn_id, ADDRINT ins_offset, ADDRINT r_base_address );
-void check_w_reg( PINTOOL_REGISTER* reg_val, Operand* reg_obj );
-void check_w_mem( ADDRINT base_address, Operand* mem_obj );
-void mark_nonEVable_w_reg( PINTOOL_REGISTER* reg_val, Operand* reg_obj );
-void mark_nonEVable_w_mem( ADDRINT base_address, Operand* mem_obj );
+void check_w_reg( PINTOOL_REGISTER* reg_val, Instruction* ins_obj_ptr );
+void check_w_mem( ADDRINT base_address, Instruction* ins_obj_ptr );
+void mark_nonEVable_w_reg( PINTOOL_REGISTER* reg_val, Instruction* ins_obj_ptr );
+void mark_nonEVable_w_mem( ADDRINT base_address, Instruction* ins_obj_ptr );
 void check_r_reg( Operand* reg_obj );
 void check_r_mem( ADDRINT base_address, Operand* mem_obj );
 
@@ -607,10 +607,10 @@ void check_write_operand( ADDRINT rtn_id, ADDRINT ins_offset, PINTOOL_REGISTER* 
     Instruction* ins_obj_ptr = INSTRUCTION_OBJ_MAP[rtn_id][ins_offset];
 
     if ( w_base_address != 0 ){
-        check_w_mem(w_base_address, ins_obj_ptr->write_memory.back());
+        check_w_mem(w_base_address, ins_obj_ptr);
     }
     else{
-        check_w_reg(reg, ins_obj_ptr->write_vec_registers.back());
+        check_w_reg(reg, ins_obj_ptr);
     }
 }
 
@@ -623,10 +623,10 @@ void mark_nonEVable_write_operand( ADDRINT rtn_id, ADDRINT ins_offset, PINTOOL_R
     Instruction* ins_obj_ptr = INSTRUCTION_OBJ_MAP[rtn_id][ins_offset];
 
     if ( w_base_address != 0 ){
-        mark_nonEVable_w_mem(w_base_address, ins_obj_ptr->write_memory.back());
+        mark_nonEVable_w_mem(w_base_address, ins_obj_ptr);
     }
     else{
-        mark_nonEVable_w_reg(reg, ins_obj_ptr->write_vec_registers.back());
+        mark_nonEVable_w_reg(reg, ins_obj_ptr);
     }
 }
 
@@ -637,10 +637,10 @@ void check_read_operands( ADDRINT rtn_id, ADDRINT ins_offset, ADDRINT r_base_add
         return;
     }
 
-    if ( (EVENT_LOG.size() > 0) && (EVENT_LOG.back().code == "----") ){
+    if ( (EVENT_LOG.size() > 0) && (EVENT_LOG.back().code == "---- ") ){
         EVENT_LOG.pop_back();
     }
-    Event event = { make_pair(rtn_id,ins_offset), "----", TAINTED.size() };
+    Event event = { make_pair(rtn_id,ins_offset), "---- ", TAINTED.size() };
     EVENT_LOG.push_back(event);
 
     Instruction* ins_obj_ptr = INSTRUCTION_OBJ_MAP[rtn_id][ins_offset];
@@ -655,13 +655,15 @@ void check_read_operands( ADDRINT rtn_id, ADDRINT ins_offset, ADDRINT r_base_add
     // if the instruction does not write a float, then we can remove the anti-taint read event
     // since there will be no subsequent check of the write
     bool ins_writes_float = ( (ins_obj_ptr->write_memory.size() > 0) || (ins_obj_ptr->write_vec_registers.size() > 0) );
-    if ( !ins_writes_float && EVENT_LOG.back().code[3] == 'A' ){
+    if ( !ins_writes_float && EVENT_LOG.back().code[4] == 'A' ){
         EVENT_LOG.pop_back();
     }
 }
 
-void mark_nonEVable_w_reg( PINTOOL_REGISTER* reg_val, Operand* reg_obj ){
+void mark_nonEVable_w_reg( PINTOOL_REGISTER* reg_val, Instruction* ins_obj_ptr ){
     
+    Operand* reg_obj = ins_obj_ptr->write_vec_registers.back();
+
     string reg_base_name = "reg_" + REG_StringShort(REG_FullRegName(reg_obj->reg)) + "_b" + to_string(reg_obj->n_bytes * 8);
     for ( uint32_t i = 0; i < REG_Size(reg_obj->reg)/reg_obj->n_bytes; ++i ){
         
@@ -712,12 +714,14 @@ void mark_nonEVable_w_reg( PINTOOL_REGISTER* reg_val, Operand* reg_obj ){
         }
     }
     
-    if ( (EVENT_LOG.back().code == "----") || (EVENT_LOG.back().code[3] == 'A') ){
+    if ( (EVENT_LOG.back().code == "---- ") || (EVENT_LOG.back().code[4] == 'A') ){
         EVENT_LOG.pop_back();
     }
 }
 
-void mark_nonEVable_w_mem( ADDRINT base_address, Operand* mem_obj ){
+void mark_nonEVable_w_mem( ADDRINT base_address, Instruction* ins_obj_ptr ){
+
+    Operand* mem_obj = ins_obj_ptr->write_memory.back();    
 
     for ( uint32_t i = 0; i < mem_obj->n_values; ++i ){
 
@@ -772,15 +776,17 @@ void mark_nonEVable_w_mem( ADDRINT base_address, Operand* mem_obj ){
         }
     }
     
-    if ( (EVENT_LOG.back().code == "----") || (EVENT_LOG.back().code[3] == 'A') ){
+    if ( (EVENT_LOG.back().code == "---- ") || (EVENT_LOG.back().code[4] == 'A') ){
         EVENT_LOG.pop_back();
     }
 }
 
-void check_w_reg( PINTOOL_REGISTER* reg_val, Operand* reg_obj ){
+void check_w_reg( PINTOOL_REGISTER* reg_val, Instruction* ins_obj_ptr ){
+
+    Operand* reg_obj = ins_obj_ptr->write_vec_registers.back();
 
     bool r_operand_was_tainted = ( EVENT_LOG.back().code[3] == 'r' );
-    bool r_operand_was_antitainted = ( EVENT_LOG.back().code[3] == 'A' );
+    bool r_operand_was_antitainted = ( EVENT_LOG.back().code[4] == 'A' );
     
     string reg_base_name = "reg_" + REG_StringShort(REG_FullRegName(reg_obj->reg)) + "_b" + to_string(reg_obj->n_bytes * 8);
     for ( uint32_t i = 0; i < REG_Size(reg_obj->reg)/reg_obj->n_bytes; ++i ){
@@ -796,14 +802,26 @@ void check_w_reg( PINTOOL_REGISTER* reg_val, Operand* reg_obj ){
         else{
             it = TAINTED.find(reg_uniq_name);
             w_reg_was_tainted = ( it != TAINTED.end() );
+            if ( w_reg_was_tainted ){
+                TAINTED.erase(it);
+            }
         }
         
         double value = get_double_value_reg( reg_val, i, reg_obj->n_bytes );
         bool w_reg_is_EV = ( isnan(value) || isinf(value) );
         
         if ( w_reg_is_EV && r_operand_was_antitainted ){
-            ANTI_TAINTED.insert(reg_uniq_name);
-            log3("anti-taint added to " + reg_uniq_name);
+            if ( is_bitwise_and(ins_obj_ptr->opcode) ){
+                TAINTED.insert(reg_uniq_name);
+                EVENT_LOG.back().taint_count = TAINTED.size(); // for ( const auto& x : TAINTED ){ log0(x); }
+                EVENT_LOG.back().code[1] = 'P';
+                log2("Prop EV @ " + reg_uniq_name);
+                log3("taint added to " + reg_uniq_name);
+            }
+            else{
+                ANTI_TAINTED.insert(reg_uniq_name);
+                log3("anti-taint added to " + reg_uniq_name);
+            }
         }
         else if ( w_reg_is_EV && r_operand_was_tainted ){
             TAINTED.insert(reg_uniq_name);
@@ -820,7 +838,6 @@ void check_w_reg( PINTOOL_REGISTER* reg_val, Operand* reg_obj ){
             log3("taint added to " + reg_uniq_name);
         }
         else if ( !w_reg_is_EV && w_reg_was_tainted ){
-            TAINTED.erase(it);
             EVENT_LOG.back().taint_count = TAINTED.size(); // for ( const auto& x : TAINTED ){ log0(x); }
             EVENT_LOG.back().code[2] = 'K';
             log2("Kill EV @ " + reg_uniq_name);
@@ -866,18 +883,20 @@ void check_w_reg( PINTOOL_REGISTER* reg_val, Operand* reg_obj ){
         }
     }
     
-    if ( (EVENT_LOG.back().code == "----") || (EVENT_LOG.back().code == "---A") ){
+    if ( (EVENT_LOG.back().code == "---- ") || (EVENT_LOG.back().code == "----A") ){
         EVENT_LOG.pop_back();
     }
-    else if( EVENT_LOG.back().code[3] == 'A' ){
-        EVENT_LOG.back().code[3] = '-';
+    else if( EVENT_LOG.back().code[4] == 'A' ){
+        EVENT_LOG.back().code[4] = ' ';
     }
 }
 
-void check_w_mem( ADDRINT base_address, Operand* mem_obj ){
+void check_w_mem( ADDRINT base_address, Instruction* ins_obj_ptr ){
+
+    Operand* mem_obj = ins_obj_ptr->write_memory.back();
 
     bool r_operand_was_tainted = ( EVENT_LOG.back().code[3] == 'r' );
-    bool r_operand_was_antitainted = ( EVENT_LOG.back().code[3] == 'A' );
+    bool r_operand_was_antitainted = ( EVENT_LOG.back().code[4] == 'A' );
 
     for ( uint32_t i = 0; i < mem_obj->n_values; ++i ){
 
@@ -894,14 +913,26 @@ void check_w_mem( ADDRINT base_address, Operand* mem_obj ){
         else{
             it = TAINTED.find(mem_uniq_name);
             w_mem_was_tainted = ( it != TAINTED.end() );
+            if ( w_mem_was_tainted ){
+                TAINTED.erase(it);
+            }
         }
 
         double value = get_double_value_mem( effective_address, mem_obj->n_bytes );
         bool w_mem_is_EV = ( isnan(value) || isinf(value) );
 
         if ( w_mem_is_EV && r_operand_was_antitainted ){
-            ANTI_TAINTED.insert(mem_uniq_name);
-            log3("anti-taint added to " + mem_uniq_name);
+            if ( is_bitwise_and(ins_obj_ptr->opcode) ){
+                TAINTED.insert(mem_uniq_name);
+                EVENT_LOG.back().taint_count = TAINTED.size(); // for ( const auto& x : TAINTED ){ log0(x); }
+                EVENT_LOG.back().code[1] = 'P';
+                log2("Prop EV @ " + mem_uniq_name);
+                log3("taint added to " + mem_uniq_name);
+            }
+            else{
+                ANTI_TAINTED.insert(mem_uniq_name);
+                log3("anti-taint added to " + mem_uniq_name);
+            }
         }
         else if ( w_mem_is_EV && r_operand_was_tainted ){
             TAINTED.insert(mem_uniq_name);
@@ -914,12 +945,10 @@ void check_w_mem( ADDRINT base_address, Operand* mem_obj ){
             TAINTED.insert(mem_uniq_name);
             EVENT_LOG.back().taint_count = TAINTED.size(); // for ( const auto& x : TAINTED ){ log0(x); }
             EVENT_LOG.back().code[0] = 'G';
-            EVENT_LOG.back().code[3] = '-';
             log2("Gen EV @ " + mem_uniq_name);
             log3("taint added to " + mem_uniq_name);
         }
         else if ( !w_mem_is_EV && w_mem_was_tainted ){
-            TAINTED.erase(it);
             EVENT_LOG.back().taint_count = TAINTED.size(); // for ( const auto& x : TAINTED ){ log0(x); }
             EVENT_LOG.back().code[2] = 'K';
             log2("Kill EV @ " + mem_uniq_name);
@@ -967,7 +996,7 @@ void check_w_mem( ADDRINT base_address, Operand* mem_obj ){
         }
     }
     
-    if ( (EVENT_LOG.back().code == "----") || (EVENT_LOG.back().code[3] == 'A') ){
+    if ( (EVENT_LOG.back().code == "---- ") || (EVENT_LOG.back().code[4] == 'A') ){
         EVENT_LOG.pop_back();
     }
 }
@@ -978,7 +1007,7 @@ void check_r_reg( Operand* reg_obj ){
         string reg_uniq_name = reg_base_name + "_" + to_string(i);        
         auto it = ANTI_TAINTED.find(reg_uniq_name);
         if ( it != ANTI_TAINTED.end() ){
-            EVENT_LOG.back().code[3] = 'A';
+            EVENT_LOG.back().code[4] = 'A';
             log3("anti-taint found @ " + reg_uniq_name);
         }
         else{
@@ -1006,7 +1035,7 @@ void check_r_mem( ADDRINT base_address, Operand* mem_obj ){
 
         auto it = ANTI_TAINTED.find(mem_uniq_name);
         if ( it != ANTI_TAINTED.end() ){
-            EVENT_LOG.back().code[3] = 'A';
+            EVENT_LOG.back().code[4] = 'A';
             log3("anti-taint found @ " + mem_uniq_name);
         }
         else{
