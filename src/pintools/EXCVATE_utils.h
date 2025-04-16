@@ -1693,6 +1693,11 @@ std::string opcode_to_smtlib2( OPCODE iclass ){
         case XED_ICLASS_VANDNPS:
             return "$bvandn";
 
+        case XED_ICLASS_PAND:
+            return "$bvand";
+        case XED_ICLASS_PANDN:
+            return "$bvandn";
+
         case XED_ICLASS_ORPD:
             return "$bvor";
         case XED_ICLASS_ORPS:
