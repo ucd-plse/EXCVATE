@@ -589,16 +589,16 @@ bool is_bitwise_and( OPCODE iclass ){
     switch (iclass){
         case XED_ICLASS_AND:
             return true;
-        case XED_ICLASS_ANDN:
-            return true;
-        case XED_ICLASS_ANDNPD:
-            return true;
-        case XED_ICLASS_ANDNPS:
+        case XED_ICLASS_PAND:
             return true;
         case XED_ICLASS_ANDPD:
             return true;
         case XED_ICLASS_ANDPS:
             return true;
+        case XED_ICLASS_VANDPD:
+        return "true";
+        case XED_ICLASS_VANDPS:
+            return "true";
         case XED_ICLASS_AND_LOCK:
             return true;
     }
