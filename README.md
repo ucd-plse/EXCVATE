@@ -320,7 +320,7 @@ From the paper:
 
 Execute the following _single command_ from the root of this repo (and __not__ inside of an already-running docker container) to run the experiments reported in the paper and to reproduce the results. This will occur in the background and should take about 12 hours.
 ```
-nohup ./scripts/start_docker_container.sh ./scripts/artifact/execute.sh &
+nohup ./scripts/start_docker_container.sh ./artifact/execute.sh &
 ```
 
 ### __[2.3]__ Inspecting the Results
@@ -328,22 +328,23 @@ nohup ./scripts/start_docker_container.sh ./scripts/artifact/execute.sh &
 At the conclusion of testing, the results will be saved in the following directory structure
 ```
 artifact/
-├── equivalence_classes.txt ............[2.3.1]
-├── figure_6.html ......................[2.3.2]
-├── table_1_data.txt ...................[2.3.3]
-├── {BLAS_IMPLEMENTATION}/
-.  ├── out.txt ...................................[2.3.4]
-.  ├── __EXCVATE_{COMPILER}_{OPTIMIZATIONS}/
-.  .  ├── nohup.out ..............................[2.3.4]
-.  .  ├── {FUNCTION_SYMBOL}/
-.  .  .  ├── {FUNCTION_SYMBOL}.io_vars ......................[2.3.5]
-.  .  .  ├── {FUNCTION_SYMBOL}.{HASH1}.{HASH2}.out ......................[2.3.6]
-.  .  .  ├── {FUNCTION_SYMBOL}.{HASH1}.{HASH2}.smt2.in{#} ...............[2.3.6]
-.  .  .  ├── {FUNCTION_SYMBOL}.{HASH1}.{HASH2}.smt2.out{#} ..............[2.3.6]
-.  .  .  ├── {FUNCTION_SYMBOL}.{HASH1}.{HASH2}.smt2.out{#}.event_trace ..[2.3.6]
-.  .  .  .
-.  .  .  .
-.  .  .  .
+├── results
+.   ├── equivalence_classes.txt ............[2.3.1]
+.   ├── figure_6.html ......................[2.3.2]
+.   ├── table_1_data.txt ...................[2.3.3]
+.   ├── {BLAS_IMPLEMENTATION}/
+.   .  ├── out.txt ...................................[2.3.4]
+.   .  ├── __EXCVATE_{COMPILER}_{OPTIMIZATIONS}/
+.   .  .  ├── nohup.out ..............................[2.3.4]
+.   .  .  ├── {FUNCTION_SYMBOL}/
+.   .  .  .  ├── {FUNCTION_SYMBOL}.io_vars ......................[2.3.5]
+.   .  .  .  ├── {FUNCTION_SYMBOL}.{HASH1}.{HASH2}.out ......................[2.3.6]
+.   .  .  .  ├── {FUNCTION_SYMBOL}.{HASH1}.{HASH2}.smt2.in{#} ...............[2.3.6]
+.   .  .  .  ├── {FUNCTION_SYMBOL}.{HASH1}.{HASH2}.smt2.out{#} ..............[2.3.6]
+.   .  .  .  ├── {FUNCTION_SYMBOL}.{HASH1}.{HASH2}.smt2.out{#}.event_trace ..[2.3.6]
+.   .  .  .  .
+.   .  .  .  .
+.   .  .  .  .
 ```
 
 #### __[2.3.1]__ `equivalence_classes.txt`
