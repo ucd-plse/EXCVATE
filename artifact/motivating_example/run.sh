@@ -6,7 +6,7 @@ filecount=1
 
 function_name=sgbmv
 
-cd /home/fptesting/FPTesting/EXCVATE_motivating_example
+cd /home/fptesting/EXCVATE_motivating_example
 
 rm -f test.out
 
