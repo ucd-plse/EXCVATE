@@ -104,6 +104,8 @@ __[2]__ _Reproducing Results from the 2025 ARITH Publication_
 
 ------------__[2.5]__ _Reproducing the Symbolic Execution Motivating Example_
 
+------------__[2.6]__ _Errata_
+
 __[3]__ _Known Limitations_
 
 
@@ -353,7 +355,7 @@ artifact/
 From the paper:
 > We perform a reduction to equivalence classes based on the assumption that exception-handling failures resulting from exception in the same source code line are indicative of the same buggy behavior. This yields 23 classes...
 
-The code for this reduction is in `scripts/reduce.py`.
+The code for this reduction is in `scripts/reduce.py`. Please note the minor errata described in [2.6].
 
 #### __[2.3.2]__ `figure_6.html`
 <img src="media/paper_figure_6.png" alt="drawing" width="900"/>
@@ -368,7 +370,7 @@ This file is an interactive HTML version of the above heatmap from the paper. Ho
 #### __[2.3.3]__ `table_1_data.txt`
 <img src="media/paper_table_1.png" alt="drawing" width="450"/>
 
-This file contains the data that populates the above table from the paper.
+This file contains the data that populates the above table from the paper. Please note the minor errata described in [2.6].
 
 #### __[2.3.4]__ `out.txt` and `nohup.out`
 
@@ -453,6 +455,9 @@ To follow the execution as it progresses, you can run `tail -f nohup.out`. At th
 ```
 ...indicating that only about 1.5% of the generated inputs revealed exception-handling failures.
 
+### __[2.6]__ Errata
+
+Commit `9ea08f4` introduces a fix that addresses some spurious exception-handling failures reported for `srotmg` in the ARITH paper. Such cases arose due to compiler-generated `divps` instructions which were "half-full", i.e., only two of the four single-precision floating-point divisions yielded results used by the program and the other two yielded NaNs (that then go unused) irregardless of the chosen function input. The Input Generator erroneously identified these two NaN-generating "dummy" divisions as using symbolic operands and so proceeded to generate inputs that trivally reified the exception-handling "failure". The issue stemmed from an uninitialized flag that the fix now correctly initializes. As a result, the third column of the `srotmg` row in Table 1 reduces from 440 to ~250 and the equivalence classes are reduced by half. Other paper results are unaffected.
 
 ## __[3]__ Known Limitations
 There is no theoretical reason the following could not be supported in EXCVATE. The limiting factor is my time.
