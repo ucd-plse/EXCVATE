@@ -433,7 +433,7 @@ void image_load1( IMG img, VOID *v ){
 }
 
 ADDRINT if_go(){
-    return FUNC_DYNAMIC_INFO_STACK.size() > 0;
+    return FUNC_DYNAMIC_INFO_STACK.size() > 1;
 }
 
 void ins_count( ADDRINT rtn_address, ADDRINT ins_offset ){
