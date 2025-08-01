@@ -14,8 +14,18 @@
 #define VERBOSE 0
 #endif
 
+#define BV32_ONE     "( ( _ to_fp 8 24 ) #b00111111100000000000000000000000 )"
+#define BV32_ABS     "( ( _ to_fp 8 24 ) #b01111111111111111111111111111111 )"
+#define BV32_NEG     "( ( _ to_fp 8 24 ) #b10000000000000000000000000000000 )"
+#define BV32_ZERO    "( ( _ to_fp 8 24 ) #b00000000000000000000000000000000 )"
+#define BV32_ID      "( ( _ to_fp 8 24 ) #b11111111111111111111111111111111 )"
+#define BV64_ONE     "( ( _ to_fp 8 24 ) #b0011111111110000000000000000000000000000000000000000000000000000 )"
+#define BV64_ABS    "( ( _ to_fp 11 53 ) #b0111111111111111111111111111111111111111111111111111111111111111 )"
+#define BV64_NEG    "( ( _ to_fp 11 53 ) #b1000000000000000000000000000000000000000000000000000000000000000 )"
+#define BV64_ZERO   "( ( _ to_fp 11 53 ) #b0000000000000000000000000000000000000000000000000000000000000000 )"
+#define BV64_ID     "( ( _ to_fp 11 53 ) #b1111111111111111111111111111111111111111111111111111111111111111 )"
+
 // #define EVS_IN_INPUTS
-#define BACK_TRACE_SIZE 3
 
 using namespace std;
 
@@ -30,6 +40,7 @@ bool SYS_WRITE_INTERCEPT_FLAG=false;
 uint32_t MAX_IO_VAR_BYTES;
 uint8_t* IO_VAR_BUFFER_BASE_PTR;
 uint32_t IO_VAR_BUFFER_OFFSET = 0;
+uint32_t IO_VAR_EXTRA_SPACE = 0;
 FuncStaticInfo* TARGETED_FUNC_STATIC_INFO;
 FuncDynamicInfo* TARGETED_FUNC_DYNAMIC_INFO;
 vector<string> ERROR_HANDLER_NAMES;
@@ -57,6 +68,8 @@ uint32_t N_HITS = 0;
 uint32_t N_EXIT0 = 0;
 uint32_t N_EXIT1 = 0;
 // set<string> SKIP;
+map<string, uint64_t> SYM_VAR_COUNTERS;
+set<string> ACTIVE_SYM_VAR_NAMES;
 
 // Forward Declarations
 void image_pass1( IMG img, void *v );
@@ -78,6 +91,863 @@ vector<ADDRINT> check_for_EVs_mem( ADDRINT base_address, uint32_t n_values, uint
 template <typename T>
 void post_call( T* return_value_ptr );
 void pre_call( ADDRINT rtn_id );
+void cmp_readVV( ADDRINT rtn_id, ADDRINT ins_offset, PINTOOL_REGISTER* r_reg1_val, PINTOOL_REGISTER* r_reg2_val );
+void cmp_readVM( ADDRINT rtn_id, ADDRINT ins_offset, PINTOOL_REGISTER* r_reg_val, ADDRINT r_base_address );
+void writeV_readV( ADDRINT rtn_id, ADDRINT ins_offset,  PINTOOL_REGISTER* r_reg_val );
+void writeV_readM( ADDRINT rtn_id, ADDRINT ins_offset,  ADDRINT r_base_address );
+void writeM_readV( ADDRINT rtn_id, ADDRINT ins_offset, ADDRINT w_mem_base_address,  PINTOOL_REGISTER* r_reg_val );
+void writeV_readVM( ADDRINT rtn_id, ADDRINT ins_offset, PINTOOL_REGISTER* r_reg_val, ADDRINT r_base_address );
+void writeV_readVV( ADDRINT rtn_id, ADDRINT ins_offset, PINTOOL_REGISTER* r_reg1_val, PINTOOL_REGISTER* r_reg2_val );
+void get_string_values_reg_operand( PINTOOL_REGISTER* reg_val, Operand* reg_obj, vector<string>& operand_values, bool& read_symbolic );
+void get_string_values_mem_operand( ADDRINT base_address, Operand* mem_obj, vector<string>& operand_values, bool& read_symbolic );
+void process_w_reg_operands( Instruction* ins_obj_ptr, vector<string>& w_operands, vector<string>& r_operands1, vector<string>& r_operands2, bool& read_symbolic );
+void process_w_mem_operands( Instruction* ins_obj_ptr, ADDRINT mem_base_address, vector<string>& w_operands, vector<string>& r_operands1, vector<string>& r_operands2, bool& read_symbolic );
+string reg_to_sym_var_base_name( Operand* reg_obj, bool create_fresh );
+string mem_to_sym_var_uniq_name( Operand* mem_obj, ADDRINT effective_address, bool create_fresh );
+void add_smt_text( Instruction* ins_obj_ptr, const vector<string>& w_operands, const vector<string>& r_operands1, const vector<string>& r_operands2 );
+void add_smt_text_helper( Instruction* ins_obj_ptr, string w_operand, string r_operand1, string r_operand2 );
+string get_bitvector_string_reg( PINTOOL_REGISTER* reg, uint32_t value_idx, uint32_t n_bytes );
+string get_bitvector_string_mem( ADDRINT address, uint32_t n_bytes );
+string select( vector<string> src, uint32_t src_start_idx, bitset<64> ctrl, uint32_t ctrl_start_idx );
+double get_double_value_reg( PINTOOL_REGISTER* reg, uint32_t value_idx, uint32_t n_bytes );
+double get_double_value_mem( ADDRINT address, uint32_t n_bytes );
+string get_relation( double value1, double value2, string r_operand1, string r_operand2 );
+
+string get_relation( double value1, double value2, string r_operand1, string r_operand2 ){
+    if ( isnan(value1) || isnan(value2) ){
+        return "nan_comparison";
+    }
+    else if ( value1 > value2 ){
+        return "fp.gt " + r_operand1 + " " + r_operand2;
+    }
+    else if ( value1 < value2 ){
+        return "fp.lt " + r_operand1 + " " + r_operand2;
+    }
+    else if ( value1 == value2 ){
+        return "fp.eq " + r_operand1 + " " + r_operand2;
+    }
+    else{
+        assert(false);
+    }
+}
+
+double get_double_value_reg( PINTOOL_REGISTER* reg, uint32_t value_idx, uint32_t n_bytes ){
+    double value = 0;
+    if ( n_bytes == 8 ){
+        value = reg->dbl[value_idx];
+    }
+    else if ( n_bytes == 4 ){
+        value = (double) reg->flt[value_idx];
+    }
+    return value;
+}
+
+double get_double_value_mem( ADDRINT address, uint32_t n_bytes ){
+    double value = 0;
+    if ( n_bytes == 8 ){
+        value = *(reinterpret_cast<double*>(address));
+    }
+    else if ( n_bytes == 4 ){
+        value = (double) *(reinterpret_cast<float*>(address));
+    }
+    return value;
+}
+
+void cmp_readVV( ADDRINT rtn_id, ADDRINT ins_offset, PINTOOL_REGISTER* r_reg1_val, PINTOOL_REGISTER* r_reg2_val ){
+
+    if (!GO ){
+        return;
+    }
+
+    Instruction* ins_obj_ptr = INSTRUCTION_OBJ_MAP[rtn_id][ins_offset];
+
+    vector<string> r_operands1;
+    vector<string> r_operands2;
+    vector<string> w_operands;
+    vector<string> conditional_expressions;
+    bool read_symbolic = false;
+
+    get_string_values_reg_operand( r_reg1_val, ins_obj_ptr->read_vec_registers.front(), r_operands1, read_symbolic );
+    get_string_values_reg_operand( r_reg2_val, ins_obj_ptr->read_vec_registers.back(), r_operands2, read_symbolic );
+    
+    if ( read_symbolic ){
+
+        double value1;
+        double value2;
+        for ( uint32_t i = 0; i < r_operands2.size(); ++i ){
+            value1 = get_double_value_reg( r_reg1_val, i, ins_obj_ptr->read_vec_registers.front()->n_bytes );
+            value2 = get_double_value_reg( r_reg2_val, i, ins_obj_ptr->read_vec_registers.back()->n_bytes );
+            conditional_expressions.push_back(get_relation(value1, value2, r_operands1[i], r_operands2[i]));
+        }
+    }
+
+    if ( ins_obj_ptr->write_vec_registers.size() > 0 ){
+        process_w_reg_operands(ins_obj_ptr, w_operands, r_operands1, conditional_expressions, read_symbolic);
+    }
+    else if ( read_symbolic ){
+        add_smt_text(ins_obj_ptr, w_operands, r_operands1, conditional_expressions);
+    }
+}
+
+void cmp_readVM( ADDRINT rtn_id, ADDRINT ins_offset, PINTOOL_REGISTER* r_reg_val, ADDRINT r_base_address ){
+
+    if (!GO ){
+        return;
+    }
+
+    Instruction* ins_obj_ptr = INSTRUCTION_OBJ_MAP[rtn_id][ins_offset];
+
+    vector<string> r_operands1;
+    vector<string> r_operands2;
+    vector<string> w_operands;
+    vector<string> conditional_expressions;
+    bool read_symbolic = false;
+
+    get_string_values_reg_operand( r_reg_val, ins_obj_ptr->read_vec_registers.front(), r_operands1, read_symbolic );
+    get_string_values_mem_operand( r_base_address, ins_obj_ptr->read_memory.back(), r_operands2, read_symbolic );
+    
+    if ( read_symbolic ){
+
+        double value1;
+        double value2;
+        for ( uint32_t i = 0; i < r_operands2.size(); ++i ){
+            value1 = get_double_value_reg( r_reg_val, i, ins_obj_ptr->read_vec_registers.back()->n_bytes );
+            value2 = get_double_value_mem( r_base_address + i*ins_obj_ptr->read_memory.back()->n_bytes, ins_obj_ptr->read_memory.back()->n_bytes );
+            conditional_expressions.push_back(get_relation(value1, value2, r_operands1[i], r_operands2[i]));
+        }
+    }
+
+    if ( ins_obj_ptr->write_vec_registers.size() > 0 ){
+        process_w_reg_operands(ins_obj_ptr, w_operands, r_operands1, conditional_expressions, read_symbolic);
+    }
+    else if ( read_symbolic ){
+        add_smt_text(ins_obj_ptr, w_operands, r_operands1, conditional_expressions);
+    }
+}
+
+void writeV_readV( ADDRINT rtn_id, ADDRINT ins_offset,  PINTOOL_REGISTER* r_reg_val ){
+
+    if ( !GO ){
+        return;
+    }
+
+    Instruction* ins_obj_ptr = INSTRUCTION_OBJ_MAP[rtn_id][ins_offset];
+
+    vector<string> r_operands1;
+    vector<string> r_operands2;
+    vector<string> w_operands;
+    bool read_symbolic = false;
+
+    get_string_values_reg_operand( r_reg_val, ins_obj_ptr->read_vec_registers.back(), r_operands1, read_symbolic );
+    process_w_reg_operands( ins_obj_ptr, w_operands, r_operands1, r_operands2, read_symbolic );
+}
+
+void writeV_readM( ADDRINT rtn_id, ADDRINT ins_offset,  ADDRINT r_base_address ){
+
+    if ( !GO ){
+        return;
+    }
+
+    Instruction* ins_obj_ptr = INSTRUCTION_OBJ_MAP[rtn_id][ins_offset];
+
+    vector<string> r_operands1;
+    vector<string> r_operands2;
+    vector<string> w_operands;
+    bool read_symbolic = false;
+
+    get_string_values_mem_operand( r_base_address, ins_obj_ptr->read_memory.back(), r_operands1, read_symbolic );
+    process_w_reg_operands( ins_obj_ptr, w_operands, r_operands1, r_operands2, read_symbolic );
+}
+
+void writeM_readV( ADDRINT rtn_id, ADDRINT ins_offset, ADDRINT w_base_address,  PINTOOL_REGISTER* r_reg_val ){
+
+    if ( !GO ){
+        return;
+    }
+
+    Instruction* ins_obj_ptr = INSTRUCTION_OBJ_MAP[rtn_id][ins_offset];
+
+    vector<string> r_operands1;
+    vector<string> r_operands2;
+    vector<string> w_operands;
+    bool read_symbolic = false;
+
+    get_string_values_reg_operand( r_reg_val, ins_obj_ptr->read_vec_registers.back(), r_operands1, read_symbolic );
+    process_w_mem_operands( ins_obj_ptr, w_base_address, w_operands, r_operands1, r_operands2, read_symbolic );
+}
+
+void writeV_readVM( ADDRINT rtn_id, ADDRINT ins_offset, PINTOOL_REGISTER* r_reg_val, ADDRINT r_base_address ){
+
+    if ( !GO ){
+        return;
+    }
+
+    Instruction* ins_obj_ptr = INSTRUCTION_OBJ_MAP[rtn_id][ins_offset];
+
+    vector<string> r_operands1;
+    vector<string> r_operands2;
+    vector<string> w_operands;
+    bool read_symbolic = false;
+
+    get_string_values_reg_operand( r_reg_val, ins_obj_ptr->read_vec_registers.back(), r_operands1, read_symbolic );
+    get_string_values_mem_operand( r_base_address, ins_obj_ptr->read_memory.back(), r_operands2, read_symbolic );
+    process_w_reg_operands( ins_obj_ptr, w_operands, r_operands1, r_operands2, read_symbolic );
+}
+
+void writeV_readVV( ADDRINT rtn_id, ADDRINT ins_offset, PINTOOL_REGISTER* r_reg1_val, PINTOOL_REGISTER* r_reg2_val ){
+
+    if ( !GO ){
+        return;
+    }
+
+    Instruction* ins_obj_ptr = INSTRUCTION_OBJ_MAP[rtn_id][ins_offset];
+
+    vector<string> r_operands1;
+    vector<string> r_operands2;
+    vector<string> w_operands;
+    bool read_symbolic = false;
+
+    get_string_values_reg_operand( r_reg1_val, ins_obj_ptr->read_vec_registers.front(), r_operands1, read_symbolic );
+    get_string_values_reg_operand( r_reg2_val, ins_obj_ptr->read_vec_registers.back(), r_operands2, read_symbolic );
+
+    process_w_reg_operands( ins_obj_ptr, w_operands, r_operands1, r_operands2, read_symbolic );
+}
+
+void process_w_reg_operands( Instruction* ins_obj_ptr, vector<string>& w_operands, vector<string>& r_operands1, vector<string>& r_operands2, bool& read_symbolic ){
+
+    // create fresh symbolic variables for write operands, but only add them to ACTIVE_SYM_VAR_NAMES within the add_smt_text routine if certain conditions are met (instruction dependent)
+    // in effect, this means the old symbolic variables for the write operands will be dead from the perspective of future reads
+    string sym_var_uniq_name;
+    string sym_var_base_name = reg_to_sym_var_base_name(ins_obj_ptr->write_vec_registers.back(), true);
+    for ( uint32_t i = 0; i < REG_Size(ins_obj_ptr->write_vec_registers.back()->reg)/ins_obj_ptr->write_vec_registers.back()->n_bytes; ++i ){
+        sym_var_uniq_name = sym_var_base_name + "_" + to_string(i);
+        w_operands.push_back(sym_var_uniq_name);
+    }
+    if ( read_symbolic ){
+        add_smt_text(ins_obj_ptr, w_operands, r_operands1, r_operands2);
+    }
+}
+
+void process_w_mem_operands( Instruction* ins_obj_ptr, ADDRINT mem_base_address, vector<string>& w_operands, vector<string>& r_operands1, vector<string>& r_operands2, bool& read_symbolic ){
+
+    // check if write addresses contain symbolic values
+    get_string_values_mem_operand( mem_base_address, ins_obj_ptr->write_memory.back(), w_operands, read_symbolic );
+
+    // create fresh symbolic variables for write operands, but only add them to ACTIVE_SYM_VAR_NAMES within the add_smt_text routine if certain conditions are met (instruction dependent)
+    // in effect, this means the old symbolic variables for the write operands will be dead from the perspective of future reads
+    string sym_var_uniq_name;
+    for ( uint32_t i = 0; i < ins_obj_ptr->write_memory.back()->n_values; ++i ){
+        ADDRINT effective_address = mem_base_address + i * ins_obj_ptr->write_memory.back()->n_bytes;
+        sym_var_uniq_name = mem_to_sym_var_uniq_name(ins_obj_ptr->write_memory.back(), effective_address, true);
+        w_operands[i] = sym_var_uniq_name;
+    }
+    if ( read_symbolic ){
+        add_smt_text(ins_obj_ptr, w_operands, r_operands1, r_operands2);   
+    }
+}
+
+void add_smt_text_helper( Instruction* ins_obj_ptr, string w_operand, string r_operand1, string r_operand2 ){
+
+    // note that symbolic write memory operands will always be relevant, regardless of whether the read operands are symbolic
+    bool symbolic_write = false;
+
+    if ( w_operand[0] == 'm' ){
+        symbolic_write = true;
+    }
+    else{
+        if ( r_operand1 != "" && ((r_operand1[0] == 'm') || (r_operand1[0] == 'r')) ){
+            symbolic_write = true;
+        }
+        if ( r_operand2 != "" && ((r_operand2[0] == 'm') || (r_operand2[0] == 'r')) ){
+            symbolic_write = true;
+        }
+    }
+
+    if ( symbolic_write == true ){
+        ACTIVE_SYM_VAR_NAMES.insert(w_operand);
+    }
+}
+
+void add_smt_text( Instruction* ins_obj_ptr, const vector<string>& w_operands, const vector<string>& r_operands1, const vector<string>& r_operands2 ){
+    // here, the rightmost read operands are used for non bitvector ops to determine n_values as VEX instructions can do some
+    // screwy things that cause the first read operand to have more reads than expected (copying over values before zeroing them out)
+    // or that cause the write operand to have more writes that expected (zeroing out upper bits)
+
+    
+    string smtlib2_op = ins_obj_ptr->smtlib2_op;
+    uint32_t n_written_values;
+    string null_arg = "";
+    if ( smtlib2_op == "$bvxor" ){
+        assert( r_operands1.size() == r_operands2.size() );
+        n_written_values = r_operands2.size();
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            if ( r_operands1[i] == BV32_NEG || r_operands1[i] == BV64_NEG ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+            }
+            else if ( r_operands2[i] == BV32_NEG || r_operands2[i] == BV64_NEG ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+            else if ( r_operands1[i] == BV32_ZERO || r_operands1[i] == BV64_ZERO ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+            }
+            else if ( r_operands2[i] == BV32_ZERO || r_operands2[i] == BV64_ZERO ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+            else if ( r_operands1[i] == r_operands2[i] ){
+                continue;
+            }
+            else{
+                assert(false && "XOR op without a BV_ZERO, BV_NEG, or identical operands");
+            }
+        }
+    }
+    else if ( smtlib2_op == "$bvand" ){
+        assert( r_operands1.size() == r_operands2.size() );
+        n_written_values = r_operands2.size();
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            if ( r_operands1[i] == BV32_ABS || r_operands1[i] == BV64_ABS ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+            }
+            else if ( r_operands2[i] == BV32_ABS || r_operands2[i] == BV64_ABS ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+            else if ( r_operands1[i] == BV32_ID || r_operands1[i] == BV64_ID ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+            }
+            else if ( r_operands2[i] == BV32_ID || r_operands2[i] == BV64_ID ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+            else if ( r_operands1[i] == BV32_ZERO || r_operands1[i] == BV64_ZERO || r_operands2[i] == BV32_ZERO || r_operands2[i] == BV64_ZERO ){
+                continue;
+            }
+            else{
+                assert(false && "AND op without a BV_ABS, BV_ID, or BV_ZERO operand");
+            }
+        }
+    }
+    else if ( smtlib2_op == "$bvor" ){
+        assert( r_operands1.size() == r_operands2.size() );
+        n_written_values = r_operands2.size();
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            if ( r_operands1[i] == BV32_ZERO || r_operands1[i] == BV64_ZERO ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+            }
+            else if ( r_operands2[i] == BV32_ZERO || r_operands2[i] == BV64_ZERO ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+            else if ( r_operands1[i] == BV32_NEG || r_operands1[i] == BV64_NEG ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+            }
+            else if ( r_operands2[i] == BV32_NEG || r_operands2[i] == BV64_NEG ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+            else{
+                assert(false && "OR op with unknown arithmetic purpose (i.e., not identity or negation)");
+            }
+        }
+    }
+    else if ( smtlib2_op == "$bvandn" ){
+        assert( r_operands1.size() == r_operands2.size() );
+        n_written_values = r_operands2.size();
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            if ( r_operands1[i] == BV32_ID || r_operands1[i] == BV64_ID ){
+                continue;
+            }
+            else if ( r_operands2[i] == BV32_ZERO || r_operands2[i] == BV64_ZERO ){
+                continue;
+            }
+            else if ( r_operands1[i] == BV32_ZERO || r_operands1[i] == BV64_ZERO ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+            }
+            else{
+                assert(false && "ANDN op with unknown arithmetic purpose (i.e., not identity or zeroing)");
+            }
+        }
+    }
+    else if ( smtlib2_op == "$cvt" ){
+
+        // cvtsd2ss (only SSE encoding)
+        // cvtss2sd (only SSE encoding)
+        // cvtps2pd
+        // cvtpd2ps
+        if ( r_operands2.size() == 0 ){
+            n_written_values = ins_obj_ptr->read_operands.back()->n_values;
+            for ( uint32_t i = 0; i < n_written_values; ++i ){
+                if ( ins_obj_ptr->write_operands.back()->n_bytes == 4 ){
+                }
+                else if ( ins_obj_ptr->write_operands.back()->n_bytes == 8 ){
+                }
+                else{
+                    assert(false && "$cvt op with unexpected write operand precision");
+                }
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+
+            // cvtpd2ps: both the SSE and VEX versions zero out the second quadword which is exceptional wrt other SSE intructions
+            // setting n_written_values to 4 means the block of code at the end of add_smt_text that updates "untouched" write operand values
+            // will ignore the second quadword in the case of SSE which will then leave the rest of the bits unmodified
+            if ( (ins_obj_ptr->write_operands.back()->n_bytes == 4) && (n_written_values == 2) ){
+                n_written_values = 4;
+            }
+        }
+
+        // cvtsd2ss (only VEX encoding)
+        // cvtss2sd (only VEX encoding)
+        else{
+            n_written_values = ins_obj_ptr->read_operands.back()->n_values;
+            for ( uint32_t i = 0; i < n_written_values; ++i ){
+                if ( ins_obj_ptr->write_operands.back()->n_bytes == 4 ){
+                }
+                else if ( ins_obj_ptr->write_operands.back()->n_bytes == 8 ){
+                }
+                else{
+                    assert(false && "$cvt op with unexpected write operand precision");
+                }
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+            }
+        }
+    }
+    else if ( smtlib2_op == "$shufp" ){
+        n_written_values = r_operands2.size();
+        bitset<64> control(ins_obj_ptr->immediates.back()->imm_value);
+        string selected_arg = "";
+        for ( uint32_t i = 0; i < n_written_values / 2; ++i ){
+            if ( i%2 == 0 ){
+                selected_arg = select(r_operands1, (i/2)*4, control, (i%2)*4);
+            }
+            else{
+                selected_arg = select(r_operands2, (i/2)*4, control, (i%2)*4);
+            }
+            add_smt_text_helper(ins_obj_ptr, w_operands[2*i], selected_arg, null_arg);
+
+            if ( i%2 == 0 ){
+                selected_arg = select(r_operands1, (i/2)*4, control, ((i%2)*4)+2);
+            }
+            else{
+                selected_arg = select(r_operands2, (i/2)*4, control, ((i%2)*4)+2);
+            }
+            add_smt_text_helper(ins_obj_ptr, w_operands[(2*i)+1], selected_arg, null_arg);
+        }
+    }
+    else if ( smtlib2_op == "$pshuf" ){
+        assert( r_operands2.size() == 0 );
+        n_written_values = r_operands1.size();
+        bitset<64> control(ins_obj_ptr->immediates.back()->imm_value);
+        string selected_arg = "";
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            selected_arg = select(r_operands1, (i/4)*4, control, i%4);
+            add_smt_text_helper(ins_obj_ptr, w_operands[i], selected_arg, null_arg);
+        }
+    }
+    else if ( smtlib2_op == "$permil" ){
+        n_written_values = r_operands1.size();
+        if ( ins_obj_ptr->immediates.size() > 0 ){
+            bitset<64> control(ins_obj_ptr->immediates.back()->imm_value);
+            string selected_arg = "";
+            for ( uint32_t i = 0; i < n_written_values; ++i ){
+                selected_arg = select(r_operands1, (i/4)*4, control, i%4);
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], selected_arg, null_arg);
+            }
+        }
+    }
+    else if ( smtlib2_op == "$blend" ){
+        n_written_values = r_operands2.size();
+        bitset<64> control(ins_obj_ptr->immediates.back()->imm_value);
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            if ( !control.test(i) ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+            else{
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+            }
+        }
+    }
+    else if ( smtlib2_op == "$vinsertf128" ){
+        bitset<64> control(ins_obj_ptr->immediates.back()->imm_value);
+        if ( control.test(0) ){
+            for ( uint32_t i = 0; i < w_operands.size()/2; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+            for ( uint32_t i = 0; i < w_operands.size()/2; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[w_operands.size()/2 + i], null_arg, r_operands2[i]);
+            }
+        }   
+        else if ( !control.test(0) ){
+            for ( uint32_t i = 0; i < w_operands.size()/2; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+            }
+            for ( uint32_t i = w_operands.size()/2; i < w_operands.size(); ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+        }
+        else{
+            assert(false);
+        }
+    }
+    else if ( smtlib2_op == "$vextractf128" ){
+        bitset<64> control(ins_obj_ptr->immediates.back()->imm_value);
+        if ( control.test(0) ){
+            for ( uint32_t i = 0; i < w_operands.size(); ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[r_operands1.size()/2 + i], null_arg);
+            }
+        }   
+        else if ( !control.test(0) ){
+            for ( uint32_t i = 0; i < w_operands.size(); ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+        }
+        else{
+            assert(false);
+        }
+    }
+    else if ( smtlib2_op == "$unpckhp" ){
+        n_written_values = r_operands2.size();
+        string selected_arg = "";
+        for ( uint32_t i = 0; i < r_operands2.size() / 2; ++i ){
+            selected_arg = r_operands1[(8/ins_obj_ptr->write_operands.back()->n_bytes)+((i/2)*2)+i];
+            add_smt_text_helper(ins_obj_ptr, w_operands[2*i], selected_arg, null_arg);
+
+            selected_arg = r_operands2[(8/ins_obj_ptr->write_operands.back()->n_bytes)+((i/2)*2)+i];
+            add_smt_text_helper(ins_obj_ptr, w_operands[(2*i) + 1], selected_arg, null_arg);
+        }
+    }
+    else if ( smtlib2_op == "$unpcklp" ){
+        n_written_values = r_operands2.size();
+        string selected_arg = "";
+        for ( uint32_t i = 0; i < r_operands2.size() / 2; ++i ){
+            selected_arg = r_operands1[((i/2)*2)+i];
+            add_smt_text_helper(ins_obj_ptr, w_operands[2*i], selected_arg, null_arg);
+
+            selected_arg = r_operands2[((i/2)*2)+i];
+            add_smt_text_helper(ins_obj_ptr, w_operands[(2*i)+1], selected_arg, null_arg);
+        }
+    }
+    else if ( smtlib2_op == "$movhlps" ){
+        if ( r_operands2.size() == 0 ){
+            n_written_values = 2;
+            for ( uint32_t i = 0; i < 2; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[2+i], null_arg);
+            }
+        }
+        else{
+            n_written_values = 4;
+            for ( uint32_t i = 0; i < 2; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[2+i]);
+
+                add_smt_text_helper(ins_obj_ptr, w_operands[2+i], r_operands1[2+i], null_arg);
+            }
+        }
+    }
+    else if ( smtlib2_op == "$movlhps" ){
+        n_written_values = 4;
+        if ( r_operands2.size() == 0 ){
+            for ( uint32_t i = 0; i < 2; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[2+i], r_operands1[i], null_arg);
+            }
+            // if either of the first two write operands are a symbolic register (and not a bitvector literal), 
+            // add an assertion that the new symbolic write variable is equivalent to the old symbolic write variable
+            for ( uint32_t i = 0; i < 2; ++i ){                
+                if ( w_operands[i][0] == 'r' ){ // sym var names are of the form reg_xmm0_i_j
+                    string previous_sym_var_name = w_operands[i];
+                    size_t second_underscore_pos = previous_sym_var_name.find('_', 7); // len(reg_xmm) = 7
+                    size_t third_underscore_pos = previous_sym_var_name.find('_', second_underscore_pos);
+                    string previous_integer = to_string(stoi(previous_sym_var_name.substr(second_underscore_pos + 1, third_underscore_pos - second_underscore_pos - 1)) - 1);
+                    previous_sym_var_name.replace(second_underscore_pos + 1, third_underscore_pos - second_underscore_pos - 1, previous_integer);
+                    if ( ACTIVE_SYM_VAR_NAMES.find(previous_sym_var_name) != ACTIVE_SYM_VAR_NAMES.end() ){
+                        add_smt_text_helper(ins_obj_ptr, w_operands[i], previous_sym_var_name, null_arg);
+                    }
+                }
+            }
+        }
+        else{
+            for ( uint32_t i = 0; i < 2; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+
+                add_smt_text_helper(ins_obj_ptr, w_operands[2+i], null_arg, r_operands2[i]);
+            }
+        }
+    }
+    else if ( smtlib2_op == "$movhp" ){
+        if ( r_operands2.size() == 0 ){
+            n_written_values = 8 / ins_obj_ptr->write_operands.back()->n_bytes;
+            for ( uint32_t i = 0; i < n_written_values; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[n_written_values + i], r_operands1[i], null_arg);
+            }
+        }
+        else{
+            n_written_values = 16 / ins_obj_ptr->write_operands.back()->n_bytes;
+            for ( uint32_t i = 0; i < n_written_values/2; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+            for ( uint32_t i = n_written_values; i < n_written_values; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[n_written_values + i], null_arg, r_operands2[i]);
+            }
+        }
+    }
+    else if ( smtlib2_op == "$movlp" ){
+        n_written_values = 8 / ins_obj_ptr->write_operands.back()->n_bytes;
+        if ( r_operands2.size() == 0 ){
+            for ( uint32_t i = 0; i < n_written_values; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+        }
+        else{
+            for ( uint32_t i = 0; i < n_written_values; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+            }
+        }
+    }
+    else if ( smtlib2_op == "$movevendup" ){
+        n_written_values = r_operands1.size();
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[2*(i/2)], null_arg);
+        }
+    }
+    else if ( smtlib2_op == "$movshdup" ){
+        n_written_values = r_operands1.size();
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[2*(i/2)+1], null_arg);
+        }
+    }
+    else if ( smtlib2_op == "$insert" ){
+        n_written_values = r_operands2.size();
+        bitset<64> control(ins_obj_ptr->immediates.back()->imm_value);
+        string tmp;
+        vector<string> tmp2;
+
+        if ( ins_obj_ptr->read_memory.size() > 0 ){
+            tmp = r_operands2[0];
+        }
+        else if ( !control.test(7) && !control.test(6) ){
+            tmp = r_operands2[0];
+        }
+        else if ( !control.test(7) && control.test(6) ){
+            tmp = r_operands2[1];
+        }
+        else if ( control.test(7) && !control.test(6) ){
+            tmp = r_operands2[2];
+        }
+        else if ( control.test(7) && control.test(6) ){
+            tmp = r_operands2[3];
+        }
+
+        if ( !control.test(5) && !control.test(4) ){
+            tmp2.push_back(tmp);
+            tmp2.push_back(r_operands1[1]);
+            tmp2.push_back(r_operands1[2]);
+            tmp2.push_back(r_operands1[3]);
+        }
+        else if ( !control.test(5) && control.test(4) ){
+            tmp2.push_back(r_operands1[0]);
+            tmp2.push_back(tmp);
+            tmp2.push_back(r_operands1[2]);
+            tmp2.push_back(r_operands1[3]);
+        }
+        else if ( control.test(5) && !control.test(4) ){
+            tmp2.push_back(r_operands1[0]);
+            tmp2.push_back(r_operands1[1]);
+            tmp2.push_back(tmp);
+            tmp2.push_back(r_operands1[3]);
+        }
+        else if ( control.test(5) && control.test(4) ){
+            tmp2.push_back(r_operands1[0]);
+            tmp2.push_back(r_operands1[1]);
+            tmp2.push_back(r_operands1[2]);
+            tmp2.push_back(tmp);
+        }
+
+        for ( uint32_t i = 0; i < 4; ++i ){
+            if ( !control.test(i) ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], tmp2[i], null_arg);
+            }
+        }
+    }
+    else if ( smtlib2_op == "$mov" ){
+        n_written_values = ins_obj_ptr->read_operands.back()->n_values;
+        if ( r_operands2.size() == 0 ){
+            for ( uint32_t i = 0; i < n_written_values; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+            }
+
+            // if second quadword is not written, this will effectively ignore it for reg writes
+            if ( r_operands1.size() < 128/(ins_obj_ptr->read_operands.back()->n_bytes*8) ){
+                n_written_values = 128/(ins_obj_ptr->read_operands.back()->n_bytes*8);
+            }
+        }
+        else{
+            for ( uint32_t i = 0; i < n_written_values; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+            }
+        }
+    }
+    else if ( smtlib2_op == "fp.sqrt" ){
+        n_written_values = ins_obj_ptr->read_operands.back()->n_values;
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            add_smt_text_helper(ins_obj_ptr, w_operands[i], null_arg, r_operands2[i]);
+        }
+    }
+    else if ( smtlib2_op == "$cmp" ){
+        n_written_values = ins_obj_ptr->read_operands.back()->n_values;
+        // in this case, r_operands2 contains the full conditional expression  
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            if ( r_operands2[i] == "nan_comparison" ){
+                log2("comparison with NaN; no constraint added");
+            }
+        }
+    }
+    else if ( smtlib2_op == "$vbroadcasts" ){
+        n_written_values = w_operands.size();
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[0], null_arg);
+        }
+    }
+    else if ( (smtlib2_op == "fp.max") || (smtlib2_op == "fp.min") ){
+        n_written_values = ins_obj_ptr->read_operands.back()->n_values;
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], r_operands2[i]);
+        }
+    }
+    else if ( smtlib2_op == "$rcp" ){
+        n_written_values = ins_obj_ptr->read_operands.back()->n_values;
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            if ( ins_obj_ptr->write_operands.back()->n_bytes == 4 ){
+            }
+            else if ( ins_obj_ptr->write_operands.back()->n_bytes == 8 ){
+            }
+            else{
+                assert(false && "$rcp op with unexpected write operand precision");
+            }
+            add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+        }
+    }
+    else if ( smtlib2_op == "$hadd" ){
+        n_written_values = ins_obj_ptr->read_operands.back()->n_values / 2;
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[2*i], r_operands1[2*i+1]);
+        }
+        if ( r_operands2.size() > 0 ){
+            for ( uint32_t i = 0; i < n_written_values; ++i ){
+                add_smt_text_helper(ins_obj_ptr, w_operands[n_written_values + i], r_operands2[2*i], r_operands2[2*i+1]);
+            }
+        }
+    }
+    else{
+        // fp.add, fp.sub, fp.mul, fp.div...
+        n_written_values = ins_obj_ptr->read_operands.back()->n_values;
+        for ( uint32_t i = 0; i < n_written_values; ++i ){
+            add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], r_operands2[i]);
+        }
+    }
+
+    // update "untouched" write operand values
+
+    // scalar vex-encoded instructions copy bits 128:[64,32] from the first read operand to the write operand if the write operand is a register
+    if ( ins_obj_ptr->disassembly[0] == 'v' ){
+        if ( (n_written_values == 1) && (w_operands.size() > 1) ){
+            for ( uint32_t i = 1; i < 128 / (ins_obj_ptr->read_operands.front()->n_bytes*8); ++i ){
+
+                // but we only need to do this if the value is symbolic
+                if ( r_operands1[i][0] == 'r' ){
+                    add_smt_text_helper(ins_obj_ptr, w_operands[i], r_operands1[i], null_arg);
+                }
+            }
+        }
+    }
+    // both scalar and packed legacy sse encoded instructions leave the unwritten bits of the write operand unmodified...
+    else{
+        for ( uint32_t i = n_written_values; i < w_operands.size(); ++i ){
+            
+            // ...so, if this write operand is a symbolic register (and not a bitvector literal), 
+            // add an assertion that the new symbolic write variable is equivalent to the old symbolic write variable
+            if ( w_operands[i][0] == 'r' ){ // sym var names are of the form reg_xmm0_i_j
+                string previous_sym_var_name = w_operands[i];
+                size_t second_underscore_pos = previous_sym_var_name.find('_', 7); // len(reg_xmm) = 7
+                size_t third_underscore_pos = previous_sym_var_name.find('_', second_underscore_pos);
+                string previous_integer = to_string(stoi(previous_sym_var_name.substr(second_underscore_pos + 1, third_underscore_pos - second_underscore_pos - 1)) - 1);
+                previous_sym_var_name.replace(second_underscore_pos + 1, third_underscore_pos - second_underscore_pos - 1, previous_integer);
+                if ( ACTIVE_SYM_VAR_NAMES.find(previous_sym_var_name) != ACTIVE_SYM_VAR_NAMES.end() ){
+                    add_smt_text_helper(ins_obj_ptr, w_operands[i], previous_sym_var_name, null_arg);
+                }
+            }
+        }
+    }
+}
+
+
+string get_bitvector_string_reg( PINTOOL_REGISTER* reg, uint32_t value_idx, uint32_t n_bytes ){
+    string value;
+    if ( n_bytes == 8 ){
+        union {
+            double in;
+            uint64_t out;
+        } data;
+        data.in = reg->dbl[value_idx];
+        bitset<64> bits(data.out);
+        value = "( ( _ to_fp 11 53 ) #b";
+        for ( int32_t i = 63; i >= 0; --i ){
+            value = value + to_string(bits[i]);
+        }
+    }
+    else if ( n_bytes == 4 ){
+        union {
+            float in;
+            uint32_t out;
+        } data;
+        data.in = reg->flt[value_idx];
+        bitset<32> bits(data.out);
+        value = "( ( _ to_fp 8 24 ) #b";
+        for ( int32_t i = 31; i >= 0; --i ){
+            value = value + to_string(bits[i]);
+        }
+    }
+    value = value + " )";
+    return value;
+}
+
+string get_bitvector_string_mem( ADDRINT address, uint32_t n_bytes ){
+    string value;
+    if ( n_bytes == 8 ){
+        union {
+            double in;
+            uint64_t out;
+        } data;
+        data.in = *(reinterpret_cast<double*>(address));
+        bitset<64> bits(data.out);
+        value = "( ( _ to_fp 11 53 ) #b";
+        for ( int32_t i = 63; i >= 0; --i ){
+            value = value + to_string(bits[i]);
+        }
+    }
+    else if ( n_bytes == 4 ){
+        union {
+            float in;
+            uint32_t out;
+        } data;
+        data.in = *(reinterpret_cast<float*>(address));
+        bitset<32> bits(data.out);
+        value = "( ( _ to_fp 8 24 ) #b";
+        for ( int32_t i = 31; i >= 0; --i ){
+            value = value + to_string(bits[i]);
+        }
+    }
+    value = value + " )";
+    return value;
+}
+
+string select( vector<string> src, uint32_t src_start_idx, bitset<64> ctrl, uint32_t ctrl_start_idx ){
+    if ( !ctrl.test(ctrl_start_idx+1) && !ctrl.test(ctrl_start_idx) ){
+        return src[src_start_idx];
+    }
+    else if ( !ctrl.test(ctrl_start_idx+1) && ctrl.test(ctrl_start_idx) ){
+        return src[src_start_idx+1];
+    }
+    else if ( ctrl.test(ctrl_start_idx+1) && !ctrl.test(ctrl_start_idx) ){
+        return src[src_start_idx+2];
+    }
+    else{
+        return src[src_start_idx+3];
+    }   
+}
 
 template <typename T>
 vector<ADDRINT> check_for_EVs_mem( ADDRINT base_address, uint32_t n_values, uint32_t n_bytes, bool print ){
@@ -194,12 +1064,31 @@ void inject_io_var( ADDRINT* actual_val_ptr, ADDRINT var_idx ){
         ++IO_VAR_BUFFER_OFFSET;
     }
 
+    uint64_t base_address = (uint64_t)IO_VAR_BUFFER_BASE_PTR + IO_VAR_BUFFER_OFFSET - total_bytes;
+    uint32_t offset = 0;
+    for ( uint32_t i=0; i < TARGETED_FUNC_DYNAMIC_INFO->io_var_idx_to_n_values[var_idx]; ++i ){
+
+        if ( TARGETED_FUNC_STATIC_INFO->io_vars[var_idx].type >= REAL_IN ){
+            string sym_var_name = "mem_" + hexstr(base_address + offset);
+            SYM_VAR_COUNTERS[sym_var_name] = 0;
+            sym_var_name = sym_var_name + "_" + to_string(SYM_VAR_COUNTERS[sym_var_name]) + "_b" + to_string(TARGETED_FUNC_STATIC_INFO->io_vars[var_idx].n_bytes * 8);
+            string sym_input_var_name = TARGETED_FUNC_STATIC_INFO->io_vars[var_idx].name + "__" + to_string(i) + "__";
+            ACTIVE_SYM_VAR_NAMES.insert(sym_var_name);
+            ACTIVE_SYM_VAR_NAMES.insert(sym_input_var_name);
+            log2("init symbolic " + sym_var_name + " for " + sym_input_var_name);
+        }
+        offset = offset + TARGETED_FUNC_STATIC_INFO->io_vars[var_idx].n_bytes;
+    }
+
     // replace the old val ptr and save the new ptr
     INJECTED_IO_VAR_PTRS.push_back((ADDRINT) IO_VAR_BUFFER_BASE_PTR + IO_VAR_BUFFER_OFFSET - total_bytes);
     *actual_val_ptr = INJECTED_IO_VAR_PTRS.back();
 
     // maintain alignment
     IO_VAR_BUFFER_OFFSET = IO_VAR_BUFFER_OFFSET + max(0, 4 - (int)total_bytes);
+
+    // skip extra space
+    IO_VAR_BUFFER_OFFSET = IO_VAR_BUFFER_OFFSET + IO_VAR_EXTRA_SPACE;
 
     // save value for use in evaluating the n_value_strings of other io_vars later in the determined process_order
     if ( TARGETED_FUNC_STATIC_INFO->io_vars[var_idx].type == INTEGER ){
@@ -298,6 +1187,8 @@ void reset_and_run( CONTEXT* ctxt, const pair<const size_t,vector<uint8_t>>* io_
     EXIT_CODE = 0;
     EV_GENERATOR_HASH = 0;
     INSTRUCTION_EXECUTION_COUNTS.clear();
+    SYM_VAR_COUNTERS.clear();
+    ACTIVE_SYM_VAR_NAMES.clear();
     INJECTED_IO_VAR_PTRS.clear();
     clock_gettime(CLOCK_MONOTONIC, &START_TIME);
     GO = true;
@@ -331,11 +1222,13 @@ void reset_and_run( CONTEXT* ctxt, const pair<const size_t,vector<uint8_t>>* io_
 void perform_analysis_loop( CONTEXT *ctxt ){
 
     // maintain alignment
+    // and add space between each io_var
     uint32_t io_var_buffer_size = MAX_IO_VAR_BYTES;
     for ( const auto& i : TARGETED_FUNC_STATIC_INFO->process_order ){
         if ( TARGETED_FUNC_STATIC_INFO->io_vars[i].n_bytes % 4 != 0 ){
             io_var_buffer_size = io_var_buffer_size + max(0, 4 - (int)TARGETED_FUNC_STATIC_INFO->io_vars[i].n_bytes);
         }
+        io_var_buffer_size = io_var_buffer_size + IO_VAR_EXTRA_SPACE;
     }
     IO_VAR_BUFFER_BASE_PTR = (uint8_t*) malloc((io_var_buffer_size) * sizeof(uint8_t));
 
@@ -474,18 +1367,18 @@ void image_pass1( IMG img, void *v ){
                 RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR) pre_call, IARG_ADDRINT, RTN_Id(rtn), IARG_END);
                 RTN_InsertCall(rtn, IPOINT_AFTER, (AFUNPTR) save_return_context, IARG_CONST_CONTEXT, IARG_END);
 
-                if ( VERBOSE >= 1 ){
+                // if ( VERBOSE >= 1 ){
                     for (INS ins = RTN_InsHead(rtn); INS_Valid(ins); ins = INS_Next(ins)){
                         instrument_instruction(ins);
                     }
-                }
-                else{
-                    for (INS ins = RTN_InsHead(rtn); INS_Valid(ins); ins = INS_Next(ins)){
-                        if ( is_EV_generator_reg(INS_Opcode(ins)) ){
-                            instrument_instruction(ins);
-                        }
-                    }
-                }
+                // }
+                // else{
+                //     for (INS ins = RTN_InsHead(rtn); INS_Valid(ins); ins = INS_Next(ins)){
+                //         if ( is_EV_generator_reg(INS_Opcode(ins)) ){
+                //             instrument_instruction(ins);
+                //         }
+                //     }
+                // }
 
                 RTN_Close(rtn);
             }
@@ -511,6 +1404,63 @@ void log_instruction( ADDRINT rtn_id, ADDRINT ins_offset, ADDRINT opcode ){
     }
 }
 
+void get_string_values_reg_operand( PINTOOL_REGISTER* reg_val, Operand* reg_obj, vector<string>& operand_values, bool& read_symbolic ){
+    string sym_var_uniq_name = "";
+    string sym_var_base_name = reg_to_sym_var_base_name(reg_obj, false);
+    for ( uint32_t i = 0; i < REG_Size(reg_obj->reg)/reg_obj->n_bytes; ++i ){
+        sym_var_uniq_name = sym_var_base_name + "_" + to_string(i);
+        auto it = ACTIVE_SYM_VAR_NAMES.find(sym_var_uniq_name);
+        if ( it != ACTIVE_SYM_VAR_NAMES.end() ){
+            read_symbolic = true;
+            operand_values.push_back(sym_var_uniq_name);
+        }
+        else{
+            operand_values.push_back(get_bitvector_string_reg( reg_val, i, reg_obj->n_bytes ));
+        }
+    }
+}
+
+void get_string_values_mem_operand( ADDRINT base_address, Operand* mem_obj, vector<string>& operand_values, bool& read_symbolic ){
+    for ( uint32_t i = 0; i < mem_obj->n_values; ++i ){
+        ADDRINT effective_address = base_address + i * mem_obj->n_bytes;
+        string sym_var_uniq_name = mem_to_sym_var_uniq_name(mem_obj, effective_address, false);
+        auto it = ACTIVE_SYM_VAR_NAMES.find(sym_var_uniq_name);
+        if ( it != ACTIVE_SYM_VAR_NAMES.end() ){
+            read_symbolic = true;
+            operand_values.push_back(sym_var_uniq_name);
+        }
+        else{
+            operand_values.push_back(get_bitvector_string_mem( effective_address, mem_obj->n_bytes ));
+        }
+    }
+}
+
+string reg_to_sym_var_base_name( Operand* reg_obj, bool create_fresh ){
+    string sym_var_base_name = "reg_" + REG_StringShort(REG_FullRegName(reg_obj->reg));
+    if ( create_fresh ){
+        if ( SYM_VAR_COUNTERS.find(sym_var_base_name) == SYM_VAR_COUNTERS.end() ){
+            SYM_VAR_COUNTERS[sym_var_base_name] = 0;
+        }
+        else{
+            SYM_VAR_COUNTERS[sym_var_base_name]++;
+        }
+    }
+    return sym_var_base_name + "_" + to_string(SYM_VAR_COUNTERS[sym_var_base_name]) + "_b" + to_string(reg_obj->n_bytes * 8);
+}
+
+string mem_to_sym_var_uniq_name( Operand* mem_obj, ADDRINT effective_address, bool create_fresh ){
+    string sym_var_uniq_name = "mem_" + hexstr(effective_address);
+    if ( create_fresh ){
+        if ( SYM_VAR_COUNTERS.find(sym_var_uniq_name) == SYM_VAR_COUNTERS.end() ){
+            SYM_VAR_COUNTERS[sym_var_uniq_name] = 0;
+        }
+        else{
+            SYM_VAR_COUNTERS[sym_var_uniq_name]++;
+        }
+    }
+    return sym_var_uniq_name + "_" + to_string(SYM_VAR_COUNTERS[sym_var_uniq_name]) + "_b" + to_string(mem_obj->n_bytes * 8);
+}
+
 void process_EV_generator_reg( ADDRINT rtn_id, ADDRINT ins_offset, ADDRINT n_values, PINTOOL_REGISTER* write_register ){
 
     if ( !GO ){
@@ -533,8 +1483,12 @@ void process_EV_generator_reg( ADDRINT rtn_id, ADDRINT ins_offset, ADDRINT n_val
         size_t temp = EV_GENERATOR_HASH_FUNCTION(EV_generator_id);
 
         if ( MODE == PRE_EV_OVERWRITE_BASELINE ){
-            IO_VARS_HASH_TO_EV_GENERATOR_HASH_MAP[CURRENT_IO_VARS->first].insert(temp);
-            log2("saving as a generator site");
+            string sym_var_name = "reg_" + REG_StringShort(REG_FullRegName(INSTRUCTION_OBJ_MAP[rtn_id][ins_offset]->write_vec_registers.back()->reg));
+            sym_var_name = sym_var_name + "_" + to_string(SYM_VAR_COUNTERS[sym_var_name]) + "_b" + to_string(INSTRUCTION_OBJ_MAP[rtn_id][ins_offset]->write_vec_registers.back()->n_bytes * 8) + "_" + to_string(i);
+            if ( ACTIVE_SYM_VAR_NAMES.find(sym_var_name) != ACTIVE_SYM_VAR_NAMES.end() ){
+                IO_VARS_HASH_TO_EV_GENERATOR_HASH_MAP[CURRENT_IO_VARS->first].insert(temp);
+                log2("saving as a generator site");
+            }
         }
         else if ( EV_GENERATOR_HASH == 0 ){
             auto it = IO_VARS_HASH_TO_EV_GENERATOR_HASH_MAP[CURRENT_IO_VARS->first].find(temp);
@@ -569,6 +1523,7 @@ void process_EV_generator_reg( ADDRINT rtn_id, ADDRINT ins_offset, ADDRINT n_val
 void instrument_instruction( INS ins ){
 
     Instruction* ins_obj_ptr = construct_instruction_object(ins);
+    ins_obj_ptr->smtlib2_op = opcode_to_smtlib2(INS_Opcode(ins));
     ADDRINT rtn_id = RTN_Id(INS_Rtn(ins));
     ADDRINT ins_offset = INS_Address(ins) - RTN_Address(INS_Rtn(ins));
     INSTRUCTION_OBJ_MAP[rtn_id][ins_offset] = ins_obj_ptr; 
@@ -578,6 +1533,98 @@ void instrument_instruction( INS ins ){
 #endif
 
     if ( MODE > BASELINE_ONLY ){
+        if ( ins_obj_ptr->read_vec_registers.size() + ins_obj_ptr->write_vec_registers.size() != 0 ){
+            if ( ins_obj_ptr->smtlib2_op == "$cmp" ){
+                if ( (ins_obj_ptr->read_memory.size() == 1) && (ins_obj_ptr->read_vec_registers.size() == 1) ){
+                    INS_InsertCall(
+                        ins,
+                        IPOINT_BEFORE,
+                        (AFUNPTR)cmp_readVM,
+                        IARG_ADDRINT, rtn_id,
+                        IARG_ADDRINT, ins_offset,
+                        IARG_REG_CONST_REFERENCE, ins_obj_ptr->read_vec_registers.back()->reg,
+                        IARG_MEMORYREAD_EA,
+                        IARG_END
+                    );
+                }
+                else if ( (ins_obj_ptr->read_memory.size() == 0) && (ins_obj_ptr->read_vec_registers.size() == 2) ){
+                    INS_InsertCall(
+                        ins,
+                        IPOINT_BEFORE,
+                        (AFUNPTR)cmp_readVV,
+                        IARG_ADDRINT, rtn_id,
+                        IARG_ADDRINT, ins_offset,
+                        IARG_REG_CONST_REFERENCE, ins_obj_ptr->read_vec_registers.front()->reg,
+                        IARG_REG_CONST_REFERENCE, ins_obj_ptr->read_vec_registers.back()->reg,
+                        IARG_END
+                    );
+                }
+                else{
+                    log0(ins_obj_ptr->disassembly);
+                    assert(false && "unexpected read operators for compare op");
+                }
+            }
+            else{
+                if ( (ins_obj_ptr->write_memory.size() == 1) && (ins_obj_ptr->write_vec_registers.size() == 0) && (ins_obj_ptr->read_vec_registers.size() == 1) && (ins_obj_ptr->read_memory.size() == 0) ){
+                    INS_InsertCall(
+                        ins,
+                        IPOINT_BEFORE,
+                        (AFUNPTR)writeM_readV,
+                        IARG_ADDRINT, rtn_id,
+                        IARG_ADDRINT, ins_offset,
+                        IARG_MEMORYWRITE_EA,
+                        IARG_REG_CONST_REFERENCE, ins_obj_ptr->read_vec_registers.back()->reg,
+                        IARG_END
+                    );
+                }
+                else if ( (ins_obj_ptr->write_memory.size() == 0) && (ins_obj_ptr->write_vec_registers.size() == 1) && (ins_obj_ptr->read_vec_registers.size() == 2) && (ins_obj_ptr->read_memory.size() == 0) ){
+                    INS_InsertCall(
+                        ins,
+                        IPOINT_BEFORE,
+                        (AFUNPTR)writeV_readVV,
+                        IARG_ADDRINT, rtn_id,
+                        IARG_ADDRINT, ins_offset,
+                        IARG_REG_CONST_REFERENCE, ins_obj_ptr->read_vec_registers.front()->reg,
+                        IARG_REG_CONST_REFERENCE, ins_obj_ptr->read_vec_registers.back()->reg,
+                        IARG_END
+                    );
+                }
+                else if ( (ins_obj_ptr->write_memory.size() == 0) && (ins_obj_ptr->write_vec_registers.size() == 1) && (ins_obj_ptr->read_vec_registers.size() == 1) && (ins_obj_ptr->read_memory.size() == 1) ){
+                    INS_InsertCall(
+                        ins,
+                        IPOINT_BEFORE,
+                        (AFUNPTR)writeV_readVM,
+                        IARG_ADDRINT, rtn_id,
+                        IARG_ADDRINT, ins_offset,
+                        IARG_REG_CONST_REFERENCE, ins_obj_ptr->read_vec_registers.back()->reg,
+                        IARG_MEMORYREAD_EA,
+                        IARG_END
+                    );
+                }
+                else if ( (ins_obj_ptr->write_memory.size() == 0) && (ins_obj_ptr->write_vec_registers.size() == 1) && (ins_obj_ptr->read_vec_registers.size() == 1) && (ins_obj_ptr->read_memory.size() == 0) ){
+                    INS_InsertCall(
+                        ins,
+                        IPOINT_BEFORE,
+                        (AFUNPTR)writeV_readV,
+                        IARG_ADDRINT, rtn_id,
+                        IARG_ADDRINT, ins_offset,
+                        IARG_REG_CONST_REFERENCE, ins_obj_ptr->read_vec_registers.back()->reg,
+                        IARG_END
+                    );
+                }
+                else if ( (ins_obj_ptr->write_memory.size() == 0) && (ins_obj_ptr->write_vec_registers.size() == 1) && (ins_obj_ptr->read_vec_registers.size() == 0) && (ins_obj_ptr->read_memory.size() == 1) ){
+                    INS_InsertCall(
+                        ins,
+                        IPOINT_BEFORE,
+                        (AFUNPTR)writeV_readM,
+                        IARG_ADDRINT, rtn_id,
+                        IARG_ADDRINT, ins_offset,
+                        IARG_MEMORYREAD_EA,
+                        IARG_END
+                    );
+                }
+            }
+        }
 
         InjectableType t = is_EV_generator_reg(INS_Opcode(ins) );
 
