@@ -40,7 +40,7 @@ bool SYS_WRITE_INTERCEPT_FLAG=false;
 uint32_t MAX_IO_VAR_BYTES;
 uint8_t* IO_VAR_BUFFER_BASE_PTR;
 uint32_t IO_VAR_BUFFER_OFFSET = 0;
-uint32_t IO_VAR_EXTRA_SPACE = 0;
+uint32_t IO_VAR_EXTRA_SPACE = 64;
 FuncStaticInfo* TARGETED_FUNC_STATIC_INFO;
 FuncDynamicInfo* TARGETED_FUNC_DYNAMIC_INFO;
 vector<string> ERROR_HANDLER_NAMES;
@@ -365,6 +365,7 @@ void add_smt_text_helper( Instruction* ins_obj_ptr, string w_operand, string r_o
 
     if ( symbolic_write == true ){
         ACTIVE_SYM_VAR_NAMES.insert(w_operand);
+        log0("saving " + w_operand + " as an active sym var; r_operand1 -> " + r_operand1 + " , r_operand2 -> " + r_operand2);
     }
 }
 
@@ -1069,13 +1070,15 @@ void inject_io_var( ADDRINT* actual_val_ptr, ADDRINT var_idx ){
     for ( uint32_t i=0; i < TARGETED_FUNC_DYNAMIC_INFO->io_var_idx_to_n_values[var_idx]; ++i ){
 
         if ( TARGETED_FUNC_STATIC_INFO->io_vars[var_idx].type >= REAL_IN ){
-            string sym_var_name = "mem_" + hexstr(base_address + offset);
-            SYM_VAR_COUNTERS[sym_var_name] = 0;
-            sym_var_name = sym_var_name + "_" + to_string(SYM_VAR_COUNTERS[sym_var_name]) + "_b" + to_string(TARGETED_FUNC_STATIC_INFO->io_vars[var_idx].n_bytes * 8);
-            string sym_input_var_name = TARGETED_FUNC_STATIC_INFO->io_vars[var_idx].name + "__" + to_string(i) + "__";
-            ACTIVE_SYM_VAR_NAMES.insert(sym_var_name);
-            ACTIVE_SYM_VAR_NAMES.insert(sym_input_var_name);
-            log2("init symbolic " + sym_var_name + " for " + sym_input_var_name);
+            if ( to_string((*(reinterpret_cast<float*>(base_address + offset)))) != "-10000000000.000000" ){
+                string sym_var_name = "mem_" + hexstr(base_address + offset);
+                SYM_VAR_COUNTERS[sym_var_name] = 0;
+                sym_var_name = sym_var_name + "_" + to_string(SYM_VAR_COUNTERS[sym_var_name]) + "_b" + to_string(TARGETED_FUNC_STATIC_INFO->io_vars[var_idx].n_bytes * 8);
+                string sym_input_var_name = TARGETED_FUNC_STATIC_INFO->io_vars[var_idx].name + "__" + to_string(i) + "__";
+                ACTIVE_SYM_VAR_NAMES.insert(sym_var_name);
+                ACTIVE_SYM_VAR_NAMES.insert(sym_input_var_name);
+                log2("init symbolic " + sym_var_name + " for " + sym_input_var_name);
+            }
         }
         offset = offset + TARGETED_FUNC_STATIC_INFO->io_vars[var_idx].n_bytes;
     }
@@ -1233,9 +1236,18 @@ void perform_analysis_loop( CONTEXT *ctxt ){
     IO_VAR_BUFFER_BASE_PTR = (uint8_t*) malloc((io_var_buffer_size) * sizeof(uint8_t));
 
     uint32_t total_overwrite_count = 0;
+    uint32_t outer_skip_count = 0;
+    uint32_t outer_skips = 50;
+    uint32_t inner_skip_count = 0;
+    uint32_t inner_skips = 100;
     for ( const auto& x : SAVED_IO_VARS_MAP ){
 
         log1("===================== " + to_string(x.first) + " =====================");
+
+        if ( outer_skip_count < outer_skips ){
+            outer_skip_count += 1;
+            continue;
+        }
 
         // if ( to_string(x.first) != "148063107919244560" ){
         //     continue;
@@ -1259,9 +1271,19 @@ void perform_analysis_loop( CONTEXT *ctxt ){
             uint32_t max_iters = 1.5 * IO_VARS_HASH_TO_EV_GENERATOR_HASH_MAP[x.first].size();
             uint32_t i = -1;
             while ( ++i < max_iters && IO_VARS_HASH_TO_EV_GENERATOR_HASH_MAP[x.first].size() > 0 ){
+                if ( inner_skip_count < inner_skips ){
+                    inner_skip_count += 1;
+                    continue;
+                }
+                else if ( N_EXIT0 > 0 ){
+                    exit(0);
+                }
                 reset_and_run(ctxt, &x);
             }
             MODE = PRE_EV_OVERWRITE_BASELINE;
+        }
+        if ( N_EXIT0 > 0 ){
+            exit(0);
         }
     }
 
@@ -1487,7 +1509,10 @@ void process_EV_generator_reg( ADDRINT rtn_id, ADDRINT ins_offset, ADDRINT n_val
             sym_var_name = sym_var_name + "_" + to_string(SYM_VAR_COUNTERS[sym_var_name]) + "_b" + to_string(INSTRUCTION_OBJ_MAP[rtn_id][ins_offset]->write_vec_registers.back()->n_bytes * 8) + "_" + to_string(i);
             if ( ACTIVE_SYM_VAR_NAMES.find(sym_var_name) != ACTIVE_SYM_VAR_NAMES.end() ){
                 IO_VARS_HASH_TO_EV_GENERATOR_HASH_MAP[CURRENT_IO_VARS->first].insert(temp);
-                log2("saving as a generator site");
+                for ( const auto & x : EV_generator_id ){
+                    log0(x);
+                }
+                log2("saving as a generator site because " + sym_var_name + " was an active sym var");
             }
         }
         else if ( EV_GENERATOR_HASH == 0 ){
@@ -1498,6 +1523,10 @@ void process_EV_generator_reg( ADDRINT rtn_id, ADDRINT ins_offset, ADDRINT n_val
                 IO_VARS_HASH_TO_EV_GENERATOR_HASH_MAP[CURRENT_IO_VARS->first].erase(it);
 
                 log2("Overwriting instruction output with EV");
+
+                for ( const auto & x : EV_generator_id ){
+                    log0(x);
+                }
 
                 EV_GENERATOR_HASH = temp;
                 if ( INSTRUCTION_OBJ_MAP[rtn_id][ins_offset]->write_vec_registers.back()->n_bytes == 8 ){

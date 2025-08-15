@@ -61,6 +61,11 @@ do
                     if grep -qe "unsat" ${y%.*}.smt2.out1
                     then
                         rm ${y%.*}*
+                        # rm ${y%.*}.smt2.out1
+                        # mv ${y%.*}.smt2.in1 ${y%.*}.smt2.in1.unsat
+                        # mv ${y%.*}.smt2.in2 ${y%.*}.smt2.in2.unsat
+                        # mv ${y%.*}.smt2.in3 ${y%.*}.smt2.in3.unsat
+                        # mv ${y%.*}.smt2.in4 ${y%.*}.smt2.in4.unsat
                     else
                         echo ${y%.*}.smt2.out1 >> ${OUTPUT_DIR}/${FUNCTION_NAME}/__new_input_file_list
                     fi
@@ -74,6 +79,9 @@ do
                     if grep -qe "unsat" ${y%.*}.smt2.out2
                     then
                         rm -f ${y%.*}.smt2.in2 ${y%.*}.smt2.out2 ${y%.*}.smt2.in4
+                        # rm ${y%.*}.smt2.out2
+                        # mv ${y%.*}.smt2.in2 ${y%.*}.smt2.in2.unsat
+                        # mv ${y%.*}.smt2.in4 ${y%.*}.smt2.in4.unsat
                     else
                         echo ${y%.*}.smt2.out2 >> ${OUTPUT_DIR}/${FUNCTION_NAME}/__new_input_file_list
                     fi
@@ -85,6 +93,9 @@ do
                     if grep -qe "unsat" ${y%.*}.smt2.out3
                     then
                         rm -f ${y%.*}.smt2.in3 ${y%.*}.smt2.out3 ${y%.*}.smt2.in4
+                        # rm ${y%.*}.smt2.out3
+                        # mv ${y%.*}.smt2.in3 ${y%.*}.smt2.in3.unsat
+                        # mv ${y%.*}.smt2.in4 ${y%.*}.smt2.in4.unsat
                     else
                         echo ${y%.*}.smt2.out3 >> ${OUTPUT_DIR}/${FUNCTION_NAME}/__new_input_file_list
                     fi
@@ -96,6 +107,8 @@ do
                     if grep -qe "unsat" ${y%.*}.smt2.out4
                     then
                         rm -f ${y%.*}.smt2.in4 ${y%.*}.smt2.out4
+                        # rm ${y%.*}.smt2.out4
+                        # mv ${y%.*}.smt2.in4 ${y%.*}.smt2.in4.unsat
                     else
                         echo ${y%.*}.smt2.out4 >> ${OUTPUT_DIR}/${FUNCTION_NAME}/__new_input_file_list
                     fi

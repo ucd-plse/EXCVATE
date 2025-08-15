@@ -6,7 +6,7 @@
 #include <iostream>
 #include <set>
 
-#define VERBOSE 0
+#define VERBOSE 3
 
 enum VarType {
     INTEGER = -2,
