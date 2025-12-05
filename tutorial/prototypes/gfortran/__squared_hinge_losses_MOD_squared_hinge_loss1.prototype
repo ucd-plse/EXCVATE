@@ -1,2 +1,3 @@
-x       r   32  in      1
+y       r   32  in      1
+t       r   32  in      1
 result  r   32  return  1

@@ -158,17 +158,17 @@ module squared_hinge_losses
 
     contains
 
-        real function squared_hinge_loss1(x)
-            real :: x
-            squared_hinge_loss1 = (max(0.0, 1-x))**2
+        real function squared_hinge_loss1(y, t)
+            real :: y, t
+            squared_hinge_loss1 = (max(0.0, 1-y*t))**2
         end function
 
-        real function squared_hinge_loss2(x)
-            real :: x
-            squared_hinge_loss2 = (max(1-x, 0.0))**2
+        real function squared_hinge_loss2(y, t)
+            real :: y, t
+            squared_hinge_loss2 = (max(1-y*t, 0.0))**2
         end function
 
-end module
+end module 
 ```
 
 Both of these functions calculate a squared hinge loss with the only difference being in the order of the operands for the `max` intrinsic function; their results should be identical.
@@ -184,7 +184,7 @@ And execute the resulting test binary:
 ./test
 ```
 
-All looks good here: our computed values match our expected values and the output of `squared_hinge_loss1` matches the output of `squared_hinge_loss2`.
+All should look good here: our computed values match our expected values and the output of `squared_hinge_loss1` matches the output of `squared_hinge_loss2`.
 
 ### __[1.2]__ Use EXCVATE to test the `gfortran` Test Executable
 
@@ -202,10 +202,11 @@ nm ./test | grep -e "squared_hinge_loss1" -e "squared_hinge_loss2"
 
 Note how these symbol names correspond to the names of the prototype files in `prototypes/gfortran`. The contents of each of these prototype files is identical:
 ```
-x       r   32  in      1
+y       r   32  in      1
+t       r   32  in      1
 result  r   32  return  1
 ```
-This indicates to EXCVATE that there is a single 32-bit real input we are naming `x` and a single 32-bit real return value we are naming `result`. (For a more elaborate example of a function prototype and the syntax supported in such files, see `artifact/blas_prototypes_single_precision_level12/sgemv_.prototype` and others BLAS prototypes in that directory.)
+This indicates to EXCVATE that there are two 32-bit real inputs `y` and `t` and a single 32-bit real return value `result`. (For a more elaborate example of a function prototype and the syntax supported in such files, see `artifact/blas_prototypes_single_precision_level12/sgemv_.prototype` and others BLAS prototypes in that directory.)
 
 #### __[1.2.2]__ Running the Execution Selector
 
@@ -232,20 +233,20 @@ You should see the following stdout:
 ```
 ** replaying function executions with nan overwrites
     __squared_hinge_losses_MOD_squared_hinge_loss2
-               Spoofed Exceptions: 2
+               Spoofed Exceptions: 3
       Exception-Handling Failures: 0
                      Failure Rate: 0.0000%
                        Miss Count: 0
     __squared_hinge_losses_MOD_squared_hinge_loss1
-               Spoofed Exceptions: 2
-      Exception-Handling Failures: 1
-                     Failure Rate: 50.0000%
+               Spoofed Exceptions: 3
+      Exception-Handling Failures: 2
+                     Failure Rate: 66.6667%
                        Miss Count: 0
 ```
-The Spoofed Exception count for each is 2 because there are two possible instructions executed that could cause an "Invalid" exception: the subtraction and a multiplication. It looks like the Exception Spoofer found a potential exception-handling failure in `squared_hinge_loss1`.
+The Spoofed Exception count for each is 3 because there are three possible instructions executed that could cause an "Invalid" exception: a subtraction and two multiplications. It looks like the Exception Spoofer found two potential exception-handling failures in `squared_hinge_loss1`.
 
 #### __[1.2.4]__ Running the Input Generator
-Because the Exception Spoofer has issued a warning about a potential exception-handling failure in `squared_hinge_loss1`, let us run the third component of EXCVATE to investigate further. The Input Generator will try to construct an input to `squared_hinge_loss1` that will reify the spoofed exception that resulted in an exception-handling failure. It will do so by (1) generating and trying to satisfy four SMT queries per warning (see paper for more details on these queries), (2) for any satisfying assignments (i.e., function inputs) found, running the function on that input to generate an event trace of executed instructions that contained exceptional values.
+Because the Exception Spoofer has issued a warning about potential exception-handling failures in `squared_hinge_loss1`, let us run the third component of EXCVATE to investigate further. The Input Generator will try to construct inputs to `squared_hinge_loss1` that will reify the spoofed exceptions that resulted in exception-handling failures. It will do so by (1) generating and trying to satisfy four SMT queries per warning (see paper for more details on these queries), (2) for any satisfying assignments (i.e., function inputs) found, running the function on that input to generate an event trace of executed instructions that contained exceptional values.
 ```
 input_generator -f prototypes/gfortran/ -- ./test 
 ```
@@ -253,8 +254,8 @@ You should see the following stdout:
 ```
 ** attempting to generate inputs that reify exception-handling failures
     __squared_hinge_losses_MOD_squared_hinge_loss1
-        2 SAT instances
-        2 event traces generated
+        4 SAT instances
+        4 event traces generated
 ```
 
 #### __[1.2.5]__ Inspecting the Results
@@ -265,21 +266,26 @@ cat __EXCVATE/__squared_hinge_losses_MOD_squared_hinge_loss1/__squared_hinge_los
 
 You should see the following (omitting a few columns for display purposes):
 ```
-(in) x: nan 
+(in) y: -1.17549e-38 
+(in) t: nan 
 (out) result: 0
 
 ====================================
 
-Disassembly                   Event   Taint Count    
-movss xmm2, dword ptr [rax]   G---    1              
-subss xmm0, xmm2              -P-r    2              
-maxss xmm0, xmm1              --Kr    1            
+Disassembly                        Event   Taint Count    
+movss xmm0, dword ptr [rax]        G---    1              
+mulss xmm2, xmm0                   -P-r    2              
+movss xmm0, dword ptr [rip+0x3cf]  --K-    1              
+subss xmm0, xmm2                   -P-r    2              
+maxss xmm0, xmm1                   --Kr    1                          
 ```
 
 At the top, we see the inputs generated by the SMT solver and the output returned by the function; a NaN input is resulting in a zero output! To shed some light on what happened, we can inspect the event trace at the bottom which lists all executed instructions where exceptional values were found:
-1. First, the `movss` instruction loaded the input NaN from memory into the `xmm2` register. The `G---` event code indicates that this was a "**G**enerate" event as this was the first instruction to see the NaN.
-2. The `subss` instruction performed the subtraction `1-x` and stored the result into `xmm0`. The `-P-r` event code indicates that there was both a "**r**ead" event (there was an exceptional value in one of the read operands) and a "**P**ropagate" event. The taint count indicates that after that instruction, EXCVATE was tracking two exceptional values: one in `xmm2` and the other in `xmm0`.
-3. The `maxss` instruction performed the max operation. The `--Kr` event code indicates that there was both a "**r**ead" event and a "**K**ill" event which overwrote the NaN in `xmm0` that was written there by the previous `subss` instruction. The decremented taint count reflects this.
+1. First, the `movss` instruction loaded the input NaN from memory into the `xmm0` register. The `G---` event code indicates that this was a "**G**enerate" event as this was the first instruction to see the `NaN`.
+2. The `mulss` instruction performed the multiplication `y*t` and stored the result into `xmm2`. The `-P-r` event code indicates that there was both a "**r**ead" event (there was an exceptional value in one of the read operands) and a "**P**ropagate" event. The taint count indicates that after that instruction, EXCVATE was tracking two exceptional values: one in `xmm2` and the other in `xmm0`.
+3. The `movss` instruction moved the constant 1 into `xmm0` to prepare for the subtraction. The `--K-` event code inticates that there was a "**K**ill" event which overwrote the `NaN` in `xmm0` that was written there by the initial `movss` instruction. The decremented taint count reflects this.
+4. The `subss` instruction performed the subtraction `1-y*t` and stored the result into `xmm0`. The instruction propagated the `NaN`. The event code and taint count reflect this.
+5. The `maxss` instruction performed the max operation. The `--Kr` event code indicates that there was both a "**r**ead" event and a "**K**ill" event which overwrote the NaN in `xmm0` that was written there by the previous `subss` instruction. The decremented taint count reflects this.
 
 This concludes the executed instructions that had exceptional values. While the non-zero taint count in the last row of the event trace highlights the fact there is still one `NaN` in the `xmm2` register, the x86 calling convention dictates that floating-point function return values are passed in `xmm0`; thus, we can deduce that the 0 return value was written by the `maxss` instruction and no further instructions read from the `xmm2` register.
 
